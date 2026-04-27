@@ -570,6 +570,7 @@ class SqlDelightWorkoutRepository(private val db: VitruvianDatabase, private val
                     createdAt = routine.createdAt,
                     lastUsed = routine.lastUsed,
                     useCount = routine.useCount.toLong(),
+                    updatedAt = currentTimeMillis(),
                     profile_id = routine.profileId,
                 )
 
@@ -670,6 +671,7 @@ class SqlDelightWorkoutRepository(private val db: VitruvianDatabase, private val
                 queries.updateRoutineById(
                     name = routine.name,
                     description = "", // Keep description empty for now
+                    updatedAt = currentTimeMillis(),
                     id = routineId,
                 )
 

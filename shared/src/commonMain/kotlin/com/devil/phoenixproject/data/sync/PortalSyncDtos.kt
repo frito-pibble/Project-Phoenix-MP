@@ -680,6 +680,7 @@ data class PullRoutineDto(
     val estimatedDuration: Int = 0,
     val timesCompleted: Int = 0,
     val isFavorite: Boolean = false,
+    val updatedAt: Long? = null,
     val exercises: List<PullRoutineExerciseDto> = emptyList(),
 )
 

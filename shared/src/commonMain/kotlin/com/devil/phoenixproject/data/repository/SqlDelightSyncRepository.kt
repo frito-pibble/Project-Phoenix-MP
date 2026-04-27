@@ -351,6 +351,7 @@ class SqlDelightSyncRepository(
                         createdAt = dto.createdAt,
                         lastUsed = existing?.lastUsed,
                         useCount = existing?.useCount ?: 0L,
+                        updatedAt = currentTimeMillis(),
                         profile_id = userProfileRepository.activeProfile.value?.id ?: "default",
                     )
 
@@ -522,6 +523,7 @@ class SqlDelightSyncRepository(
                         createdAt = existing?.createdAt ?: currentTimeMillis(),
                         lastUsed = existing?.lastUsed,
                         useCount = existing?.useCount ?: 0L,
+                        updatedAt = portalRoutine.updatedAt ?: currentTimeMillis(),
                         profile_id = existing?.profile_id ?: profileId,
                     )
 
@@ -1479,6 +1481,7 @@ class SqlDelightSyncRepository(
                         createdAt = existing?.createdAt ?: currentTimeMillis(),
                         lastUsed = existing?.lastUsed,
                         useCount = existing?.useCount ?: 0L,
+                        updatedAt = portalRoutine.updatedAt ?: currentTimeMillis(),
                         profile_id = existing?.profile_id ?: profileId,
                     )
 
