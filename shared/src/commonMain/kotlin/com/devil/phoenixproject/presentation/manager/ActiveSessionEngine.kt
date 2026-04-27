@@ -975,39 +975,49 @@ class ActiveSessionEngine(
      * @param timestamp Rep completion timestamp
      */
     private fun processBiomechanicsForRep(repNumber: Int, timestamp: Long) {
+        val allMetrics = coordinator.collectedMetrics.value
+        val boundaries = coordinator.repBoundaryTimestamps.value
+        if (boundaries.isEmpty()) {
+            Logger.d { "Biomechanics: no rep boundary for rep $repNumber" }
+            return
+        }
+
         scope.launch(Dispatchers.Default) {
-            val allMetrics = coordinator.collectedMetrics.value
-            val boundaries = coordinator.repBoundaryTimestamps.value
+            try {
+                // Segment: metrics between previous boundary and current boundary
+                val prevBoundary = if (boundaries.size >= 2) boundaries[boundaries.size - 2] else 0L
+                val currentBoundary = boundaries.last()
 
-            // Segment: metrics between previous boundary and current boundary
-            val prevBoundary = if (boundaries.size >= 2) boundaries[boundaries.size - 2] else 0L
-            val currentBoundary = boundaries.last()
+                val repMetrics = allMetrics.filter { it.timestamp in (prevBoundary + 1)..currentBoundary }
+                if (repMetrics.isEmpty()) {
+                    Logger.d { "Biomechanics: no metrics for rep $repNumber (boundary $prevBoundary..$currentBoundary)" }
+                    return@launch
+                }
 
-            val repMetrics = allMetrics.filter { it.timestamp in (prevBoundary + 1)..currentBoundary }
-            if (repMetrics.isEmpty()) {
-                Logger.d { "Biomechanics: no metrics for rep $repNumber (boundary $prevBoundary..$currentBoundary)" }
-                return@launch
+                // Split into concentric/eccentric using velocity direction
+                // Concentric = lifting (positive velocity), Eccentric = lowering (negative velocity)
+                // Approximate: use first half as concentric if we can't determine from velocity
+                val concentricMetrics = repMetrics.filter {
+                    it.velocityA > 0 || it.velocityB > 0
+                }.takeIf { it.isNotEmpty() } ?: run {
+                    // Fallback: first half is concentric
+                    val midpoint = repMetrics.size / 2
+                    if (midpoint > 0) repMetrics.take(midpoint) else repMetrics
+                }
+
+                coordinator.biomechanicsEngine.processRep(
+                    repNumber = repNumber,
+                    concentricMetrics = concentricMetrics,
+                    allRepMetrics = repMetrics,
+                    timestamp = timestamp,
+                )
+
+                Logger.d { "Biomechanics processed: rep=$repNumber, metrics=${repMetrics.size}, concentric=${concentricMetrics.size}" }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Logger.e(e) { "Biomechanics processing failed for rep $repNumber" }
             }
-
-            // Split into concentric/eccentric using velocity direction
-            // Concentric = lifting (positive velocity), Eccentric = lowering (negative velocity)
-            // Approximate: use first half as concentric if we can't determine from velocity
-            val concentricMetrics = repMetrics.filter {
-                it.velocityA > 0 || it.velocityB > 0
-            }.takeIf { it.isNotEmpty() } ?: run {
-                // Fallback: first half is concentric
-                val midpoint = repMetrics.size / 2
-                if (midpoint > 0) repMetrics.take(midpoint) else repMetrics
-            }
-
-            coordinator.biomechanicsEngine.processRep(
-                repNumber = repNumber,
-                concentricMetrics = concentricMetrics,
-                allRepMetrics = repMetrics,
-                timestamp = timestamp,
-            )
-
-            Logger.d { "Biomechanics processed: rep=$repNumber, metrics=${repMetrics.size}, concentric=${concentricMetrics.size}" }
         }
     }
 

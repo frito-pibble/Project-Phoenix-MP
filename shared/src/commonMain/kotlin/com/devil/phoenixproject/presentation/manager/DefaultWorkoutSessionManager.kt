@@ -30,6 +30,7 @@ import com.devil.phoenixproject.domain.usecase.RepCounterFromMachine
 import com.devil.phoenixproject.domain.usecase.ResolveRoutineWeightsUseCase
 import com.devil.phoenixproject.getPlatform
 import com.devil.phoenixproject.util.DataBackupManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -287,6 +288,7 @@ class DefaultWorkoutSessionManager(
                     }
                 }
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 Logger.e(e) { "Error in summary auto-advance collector" }
             }
         }
@@ -329,6 +331,7 @@ class DefaultWorkoutSessionManager(
                         }
                     }
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 Logger.e(e) { "Error in workout foreground service collector" }
             }
         }
