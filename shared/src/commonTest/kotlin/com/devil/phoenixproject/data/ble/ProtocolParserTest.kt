@@ -485,7 +485,7 @@ class ProtocolParserTest {
     }
 
     @Test
-    fun `parseRepPacket parses 7 to 23 byte payload as legacy (Issue 388 V-Form fix)`() {
+    fun `parseRepPacket parses 7 to 23 byte payload as legacy - Issue 388 V-Form fix`() {
         // Issue #388: V-Form Trainer firmware emits rep packets shorter than 24 bytes
         // but longer than 6. Phoenix MP previously rejected these (regression of parent
         // repo PR #190 fix from Issue #187/#174). Restored: any 6..23 byte payload parses
@@ -506,7 +506,7 @@ class ProtocolParserTest {
     }
 
     @Test
-    fun `parseRepPacket parses 16-byte legacy V-Form format (Issue 388)`() {
+    fun `parseRepPacket parses 16-byte legacy V-Form format - Issue 388`() {
         // Most likely V-Form rep size per official com.vitruvian.formtrainer.Reps spec
         // (4-byte int up + 4-byte int down + 4-byte float rangeTop + 4-byte float rangeBottom
         // = 16 bytes minimum, with optional 4× short trailer making 24).
