@@ -206,6 +206,7 @@ open class PortalApiClient(private val supabaseConfig: SupabaseConfig, private v
         ignoreUnknownKeys = true
         isLenient = true
         encodeDefaults = true
+        explicitNulls = false
     }
 
     private val httpClient = HttpClient {

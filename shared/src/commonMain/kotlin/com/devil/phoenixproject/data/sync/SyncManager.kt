@@ -977,6 +977,8 @@ class SyncManager(
         val filteredRoutineIds = filterUuids(rawRoutineIds, "routineIds")
         val filteredSessionIds = filterUuids(rawSessionIds, "sessionIds")
         val filteredCycleIds = filterUuids(rawCycleIds, "cycleIds")
+        val filteredBadgeIds = filterUuids(rawBadgeIds, "badgeIds")
+        val filteredPrIds = filterUuids(rawPrIds, "personalRecordIds")
 
         fun <T> capParity(list: List<T>, label: String): List<T> =
             if (list.size <= SyncConfig.MAX_PARITY_IDS) {
@@ -994,8 +996,8 @@ class SyncManager(
             sessionIds = capParity(filteredSessionIds, "sessionIds"),
             routineIds = capParity(filteredRoutineIds, "routineIds"),
             cycleIds = capParity(filteredCycleIds, "cycleIds"),
-            badgeIds = capParity(rawBadgeIds, "badgeIds"),
-            personalRecordIds = capParity(rawPrIds, "personalRecordIds"),
+            badgeIds = capParity(filteredBadgeIds, "badgeIds"),
+            personalRecordIds = capParity(filteredPrIds, "personalRecordIds"),
         )
 
         Logger.i("SyncManager") {
