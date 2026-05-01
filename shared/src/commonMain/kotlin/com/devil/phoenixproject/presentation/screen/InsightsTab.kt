@@ -31,6 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.devil.phoenixproject.data.repository.ExerciseRepository
 import com.devil.phoenixproject.domain.model.PersonalRecord
@@ -45,6 +46,7 @@ import com.devil.phoenixproject.presentation.components.VolumeVsIntensityCard
 import com.devil.phoenixproject.presentation.components.WorkoutModeDistributionCard
 import com.devil.phoenixproject.presentation.components.charts.HistoryTimePeriod
 import com.devil.phoenixproject.presentation.util.ResponsiveDimensions
+import com.devil.phoenixproject.presentation.util.isCompactAccessibilityLayout
 import com.devil.phoenixproject.ui.theme.Spacing
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.TimeZone
@@ -89,6 +91,7 @@ fun InsightsTab(
     formatWeight: (Float, WeightUnit) -> String = { w, u -> "${w.toInt()} ${u.name.lowercase()}" },
 ) {
     var selectedPeriod by remember { mutableStateOf(HistoryTimePeriod.ALL) }
+    val useCompactAccessibility = isCompactAccessibilityLayout()
 
     // Filter sessions by selected time period
     val filteredSessions = remember(workoutSessions, selectedPeriod) {
@@ -136,23 +139,53 @@ fun InsightsTab(
 
         // Time period filter chips — scrollable for Bold Text accessibility
         item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                HistoryTimePeriod.entries.forEach { period ->
-                    FilterChip(
-                        selected = selectedPeriod == period,
-                        onClick = { selectedPeriod = period },
-                        label = {
-                            Text(
-                                period.label,
-                                style = MaterialTheme.typography.labelMedium,
+            val periods = HistoryTimePeriod.entries
+            if (useCompactAccessibility) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        periods.take(2).forEach { period ->
+                            HistoryPeriodChip(
+                                period = period,
+                                selected = selectedPeriod == period,
+                                onClick = { selectedPeriod = period },
+                                modifier = Modifier.weight(1f),
                             )
-                        },
-                    )
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        periods.drop(2).forEach { period ->
+                            HistoryPeriodChip(
+                                period = period,
+                                selected = selectedPeriod == period,
+                                onClick = { selectedPeriod = period },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    periods.forEach { period ->
+                        HistoryPeriodChip(
+                            period = period,
+                            selected = selectedPeriod == period,
+                            onClick = { selectedPeriod = period },
+                        )
+                    }
                 }
             }
         }
@@ -271,4 +304,26 @@ fun InsightsTab(
             }
         }
     }
+}
+
+@Composable
+private fun HistoryPeriodChip(
+    period: HistoryTimePeriod,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        modifier = modifier,
+        label = {
+            Text(
+                period.label,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+    )
 }

@@ -75,6 +75,13 @@ class FakeSyncRepository : SyncRepository {
 
     override suspend fun getFullRoutinesModifiedSince(timestamp: Long, profileId: String): List<Routine> = routinesToReturn
 
+    var deletedRoutineIdsToReturn: List<String> = emptyList()
+    var deletedCycleIdsToReturn: List<String> = emptyList()
+
+    override suspend fun getDeletedRoutineIdsSince(timestamp: Long, profileId: String): List<String> = deletedRoutineIdsToReturn
+
+    override suspend fun getDeletedCycleIdsSince(timestamp: Long, profileId: String): List<String> = deletedCycleIdsToReturn
+
     // === ID Mapping ===
 
     override suspend fun updateServerIds(mappings: IdMappings) {
@@ -137,6 +144,17 @@ class FakeSyncRepository : SyncRepository {
     override suspend fun getAllCycleIds(profileId: String): List<String> = cycleIds
     override suspend fun getAllBadgeIds(profileId: String): List<String> = badgeIds
     override suspend fun getAllPersonalRecordIds(profileId: String): List<String> = personalRecordIds
+
+    var hardDeletedRoutineIds: List<String> = emptyList()
+    var hardDeletedCycleIds: List<String> = emptyList()
+
+    override suspend fun hardDeleteRoutinesByIds(ids: List<String>) {
+        hardDeletedRoutineIds = ids
+    }
+
+    override suspend fun hardDeleteCyclesByIds(ids: List<String>) {
+        hardDeletedCycleIds = ids
+    }
 
     // === Stubs for new sync interface methods (added for cycle/PR/phase/signature/assessment sync) ===
 
