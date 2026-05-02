@@ -569,6 +569,22 @@ class PortalSyncAdapterTest {
     }
 
     @Test
+    fun `toPortalRoutine maps all-AMRAP reps with null for every set`() {
+        val exercises = listOf(
+            makeRoutineExercise(
+                setRepsOverride = listOf(null, null, null),
+                isAMRAP = true,
+            ),
+        )
+        val routine = makeRoutine(exercises = exercises)
+
+        val result = PortalSyncAdapter.toPortalRoutine(routine, "user-1")
+
+        assertEquals("[null,null,null]", result.exercises[0].perSetReps)
+        assertTrue(result.exercises[0].isAmrap)
+    }
+
+    @Test
     fun `toPortalRoutine perSetReps is null for single uniform set`() {
         val exercises = listOf(
             makeRoutineExercise(sets = 1, reps = 10),
