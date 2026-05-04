@@ -116,6 +116,11 @@ fun WorkoutTab(
         motionStartHoldProgress = state.motionStartHoldProgress,
         isRestPaused = state.isRestPaused,
         justLiftRestCountdown = state.justLiftRestCountdown,
+        isExerciseTimerPaused = state.isExerciseTimerPaused,
+        onPauseExerciseTimer = actions::onPauseExerciseTimer,
+        onResumeExerciseTimer = actions::onResumeExerciseTimer,
+        onResetExerciseTimer = actions::onResetExerciseTimer,
+        velocityLossThresholdPercent = state.velocityLossThresholdPercent,
     )
 }
 
@@ -188,6 +193,13 @@ fun WorkoutTab(
     isRestPaused: Boolean = false,
     // Issue #113: Just Lift visual rest countdown (null = not resting)
     justLiftRestCountdown: Int? = null,
+    // Issue #190: Exercise timer controls
+    isExerciseTimerPaused: Boolean = false,
+    onPauseExerciseTimer: () -> Unit = {},
+    onResumeExerciseTimer: () -> Unit = {},
+    onResetExerciseTimer: () -> Unit = {},
+    // Issue #313: VBT velocity loss threshold for HUD visualization
+    velocityLossThresholdPercent: Int = 20,
 ) {
     // Note: HapticFeedbackEffect is now global in EnhancedMainScreen
     // No need for local haptic effect here
@@ -224,6 +236,11 @@ fun WorkoutTab(
                 detectionState = detectionState,
                 onDetectionConfirmed = onDetectionConfirmed,
                 onDetectionDismissed = onDetectionDismissed,
+                isExerciseTimerPaused = isExerciseTimerPaused,
+                onPauseExerciseTimer = onPauseExerciseTimer,
+                onResumeExerciseTimer = onResumeExerciseTimer,
+                onResetExerciseTimer = onResetExerciseTimer,
+                velocityLossThresholdPercent = velocityLossThresholdPercent,
                 modifier = Modifier.fillMaxSize(),
             )
 
@@ -392,10 +409,15 @@ fun WorkoutTab(
             when (workoutState) {
                 is WorkoutState.Countdown -> {
                     if (!workoutParameters.isJustLift) {
+                        val currentExercise = loadedRoutine?.exercises?.getOrNull(currentExerciseIndex)
+                        val displayMultiplier = currentExercise?.exercise?.displayMultiplier
+                            ?: currentExercise?.exercise?.preferredCableCount
+                            ?: 1
+                        val totalWeight = workoutParameters.weightPerCableKg * displayMultiplier
                         CountdownCard(
                             countdownSecondsRemaining = workoutState.secondsRemaining,
-                            nextExerciseName = loadedRoutine?.exercises?.getOrNull(currentExerciseIndex)?.exercise?.name ?: "Exercise",
-                            nextExerciseWeight = workoutParameters.weightPerCableKg,
+                            nextExerciseName = currentExercise?.exercise?.name ?: "Exercise",
+                            nextExerciseWeight = totalWeight,
                             nextExerciseReps = workoutParameters.reps,
                             nextExerciseMode = workoutParameters.programMode.displayName,
                             currentExerciseIndex = if (loadedRoutine != null) currentExerciseIndex else null,

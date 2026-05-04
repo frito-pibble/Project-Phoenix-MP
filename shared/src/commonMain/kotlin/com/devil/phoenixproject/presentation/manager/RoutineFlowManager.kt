@@ -4,6 +4,7 @@ import co.touchlab.kermit.Logger
 import com.devil.phoenixproject.data.repository.AutoStopUiState
 import com.devil.phoenixproject.data.repository.CompletedSetRepository
 import com.devil.phoenixproject.data.repository.ExerciseRepository
+import com.devil.phoenixproject.data.repository.SqlDelightWorkoutRepository
 import com.devil.phoenixproject.data.repository.UserProfileRepository
 import com.devil.phoenixproject.data.repository.WorkoutRepository
 import com.devil.phoenixproject.domain.model.EccentricLoad
@@ -13,6 +14,7 @@ import com.devil.phoenixproject.domain.model.RepCount
 import com.devil.phoenixproject.domain.model.Routine
 import com.devil.phoenixproject.domain.model.RoutineExercise
 import com.devil.phoenixproject.domain.model.RoutineFlowState
+import com.devil.phoenixproject.domain.model.RoutineGroup
 import com.devil.phoenixproject.domain.model.RoutineItem
 import com.devil.phoenixproject.domain.model.Superset
 import com.devil.phoenixproject.domain.model.SupersetColors
@@ -20,6 +22,7 @@ import com.devil.phoenixproject.domain.model.WorkoutParameters
 import com.devil.phoenixproject.domain.model.WorkoutState
 import com.devil.phoenixproject.domain.model.currentTimeMillis
 import com.devil.phoenixproject.domain.model.generateSupersetId
+import com.devil.phoenixproject.domain.model.generateUUID
 import com.devil.phoenixproject.domain.usecase.ResolveRoutineWeightsUseCase
 import com.devil.phoenixproject.util.Constants
 import kotlinx.coroutines.CancellationException
@@ -141,7 +144,56 @@ class RoutineFlowManager(
                 Logger.e(e) { "Error initializing exercise library" }
             }
         }
+
+        // Collector #3: Load routine groups for active profile
+        // Uses same retry-with-backoff pattern as Collector #1 — if the DB is
+        // mid-migration when groups load, the collector would die permanently
+        // and groups stay invisible until app restart.
+        scope.launch {
+            val repo = groupRepo
+            if (repo == null) {
+                Logger.e { "ROUTINE_GROUPS: Cannot load groups — groupRepo unavailable" }
+                return@launch
+            }
+            var retryCount = 0
+            val maxRetries = 3
+            while (retryCount <= maxRetries) {
+                try {
+                    userProfileRepository.activeProfile
+                        .flatMapLatest { profile ->
+                            val profileId = profile?.id ?: "default"
+                            Logger.d { "ROUTINE_GROUPS: Subscribing for profile=$profileId (attempt=${retryCount + 1})" }
+                            repo.getAllRoutineGroups(profileId)
+                        }
+                        .collect { groups ->
+                            Logger.d { "ROUTINE_GROUPS: Got ${groups.size} groups" }
+                            coordinator._routineGroups.value = groups
+                        }
+                    break
+                } catch (e: Exception) {
+                    retryCount++
+                    Logger.e(e) { "ROUTINE_GROUPS: Error loading groups (attempt $retryCount/$maxRetries)" }
+                    if (retryCount <= maxRetries) {
+                        delay(1000L * retryCount) // Back off: 1s, 2s, 3s
+                    }
+                }
+            }
+            if (retryCount > maxRetries) {
+                Logger.e { "ROUTINE_GROUPS: All $maxRetries retries exhausted — groups will remain empty until app restart" }
+            }
+        }
     }
+
+    /**
+     * Concrete repo access for RoutineGroup CRUD (groups are local-only, not on WorkoutRepository interface).
+     * Safe cast: logs error if the underlying implementation changes.
+     */
+    private val groupRepo: SqlDelightWorkoutRepository?
+        get() = (workoutRepository as? SqlDelightWorkoutRepository).also {
+            if (it == null) {
+                Logger.e { "ROUTINE_GROUPS: workoutRepository is not SqlDelightWorkoutRepository — group operations unavailable" }
+            }
+        }
 
     // ===== Superset Navigation Helpers (private) =====
 
@@ -536,6 +588,50 @@ class RoutineFlowManager(
         }
     }
 
+    // ===== Routine Group CRUD =====
+
+    fun createGroup(name: String) {
+        scope.launch {
+            val repo = groupRepo ?: return@launch
+            val group = RoutineGroup(
+                id = generateUUID(),
+                name = name,
+                profileId = userProfileRepository.activeProfile.value?.id ?: "default",
+                orderIndex = coordinator._routineGroups.value.size,
+                createdAt = currentTimeMillis(),
+            )
+            repo.saveRoutineGroup(group)
+            Logger.d { "ROUTINE_GROUPS: Created group '${group.name}' (${group.id})" }
+        }
+    }
+
+    fun renameGroup(groupId: String, newName: String) {
+        scope.launch {
+            val repo = groupRepo ?: return@launch
+            val existing = coordinator._routineGroups.value.find { it.id == groupId } ?: return@launch
+            repo.updateRoutineGroup(existing.copy(name = newName))
+            Logger.d { "ROUTINE_GROUPS: Renamed group '$groupId' to '$newName'" }
+        }
+    }
+
+    fun deleteGroup(groupId: String) {
+        scope.launch {
+            val repo = groupRepo ?: return@launch
+            repo.deleteRoutineGroup(groupId)
+            Logger.d { "ROUTINE_GROUPS: Deleted group '$groupId' (routines become ungrouped via ON DELETE SET NULL)" }
+        }
+    }
+
+    fun moveRoutinesToGroup(routineIds: Set<String>, groupId: String?) {
+        scope.launch {
+            val repo = groupRepo ?: return@launch
+            routineIds.forEach { id ->
+                repo.moveRoutineToGroup(id, groupId)
+            }
+            Logger.d { "ROUTINE_GROUPS: Moved ${routineIds.size} routine(s) to group=${groupId ?: "ungrouped"}" }
+        }
+    }
+
     // ===== Routine Loading =====
 
     /**
@@ -625,7 +721,7 @@ class RoutineFlowManager(
             ?: firstExercise.weightPerCableKg
 
         // Only bodyweight exercises should have warmupReps = 0
-        val isFirstBodyweight = isBodyweightExercise(firstExercise)
+        val isFirstBodyweight = firstExercise.exercise.isBodyweight
 
         // Issue #203: Fallback to exercise-level isAMRAP flag for legacy ExerciseEditDialog compatibility
         // Legacy "Last set AMRAP" only applies when we're on the last set (set index 0 for single-set exercises)
@@ -720,7 +816,7 @@ class RoutineFlowManager(
 
             // Issue #356: Initialize warm-up state for the first exercise
             val firstExercise = normalized.exercises.firstOrNull()
-            val isFirstBodyweight = isBodyweightExercise(firstExercise)
+            val isFirstBodyweight = firstExercise?.exercise?.isBodyweight ?: false
             if (firstExercise != null && firstExercise.warmupSets.isNotEmpty() && !isFirstBodyweight) {
                 coordinator._currentWarmupSetIndex.value = 0
                 coordinator._totalWarmupSets.value = firstExercise.warmupSets.size
@@ -779,7 +875,7 @@ class RoutineFlowManager(
         // Issue #356: Initialize warm-up state when entering a new exercise at set 0
         // This ensures warm-up sets are executed when navigating via SetReady skip/prev
         if (isNewExercise && setIndex == 0) {
-            val isBodyweight = isBodyweightExercise(exercise)
+            val isBodyweight = exercise.exercise.isBodyweight
             if (exercise.warmupSets.isNotEmpty() && !isBodyweight) {
                 coordinator._currentWarmupSetIndex.value = 0
                 coordinator._totalWarmupSets.value = exercise.warmupSets.size
@@ -841,7 +937,7 @@ class RoutineFlowManager(
         // Issue #356: Initialize warm-up state when entering a new exercise at set 0
         // This is the main path from RoutineOverviewScreen when user taps "Start"
         if (isNewExercise && setIndex == 0) {
-            val isBodyweight = isBodyweightExercise(exercise)
+            val isBodyweight = exercise.exercise.isBodyweight
             if (exercise.warmupSets.isNotEmpty() && !isBodyweight) {
                 coordinator._currentWarmupSetIndex.value = 0
                 coordinator._totalWarmupSets.value = exercise.warmupSets.size
@@ -876,9 +972,10 @@ class RoutineFlowManager(
      */
     fun updateSetReadyWeight(weight: Float) {
         val state = coordinator._routineFlowState.value
-        if (state is RoutineFlowState.SetReady && weight >= 0f) {
-            coordinator._routineFlowState.value = state.copy(adjustedWeight = weight)
-            coordinator._workoutParameters.value = coordinator._workoutParameters.value.copy(weightPerCableKg = weight)
+        if (state is RoutineFlowState.SetReady) {
+            val clampedWeight = weight.coerceIn(Constants.MIN_WEIGHT_KG, Constants.MAX_WEIGHT_PER_CABLE_KG)
+            coordinator._routineFlowState.value = state.copy(adjustedWeight = clampedWeight)
+            coordinator._workoutParameters.value = coordinator._workoutParameters.value.copy(weightPerCableKg = clampedWeight)
         }
     }
 
@@ -1047,9 +1144,10 @@ class RoutineFlowManager(
         }
 
         // Phase 35C: Initialize warm-up phase when jumping to exercise with warmupSets
-        val isBodyweight = exercise.exercise.equipment.lowercase().let {
-            it == "bodyweight" || it == "body weight" || it == "none"
-        }
+        // Fixed: Use canonical isBodyweight check (hasCableAccessory) instead of
+        // incorrect equipment string comparison that missed exercises with non-cable
+        // equipment like BENCH.
+        val isBodyweight = exercise.exercise.isBodyweight
         if (exercise.warmupSets.isNotEmpty() && !isBodyweight) {
             coordinator._currentWarmupSetIndex.value = 0
             coordinator._totalWarmupSets.value = exercise.warmupSets.size
@@ -1411,7 +1509,14 @@ class RoutineFlowManager(
  * in the exercise's equipment list. Non-cable equipment like BENCH is allowed.
  *
  * Top-level function accessible to both RoutineFlowManager and DWSM/ActiveSessionEngine.
+ *
+ * @deprecated Use `exercise.exercise.isBodyweight` instead for direct property access.
+ *   Retained for backward compatibility with existing ActiveSessionEngine callers.
  */
+@Deprecated(
+    message = "Use exercise.exercise.isBodyweight property instead",
+    replaceWith = ReplaceWith("exercise?.exercise?.isBodyweight ?: false"),
+)
 internal fun isBodyweightExercise(exercise: RoutineExercise?): Boolean = exercise?.let {
     val isBodyweight = !it.exercise.hasCableAccessory
     Logger.d {

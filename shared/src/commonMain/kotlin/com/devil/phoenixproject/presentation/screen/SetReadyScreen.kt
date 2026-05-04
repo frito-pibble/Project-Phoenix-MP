@@ -1,14 +1,50 @@
 package com.devil.phoenixproject.presentation.screen
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -20,16 +56,30 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.devil.phoenixproject.data.repository.ExerciseRepository
 import com.devil.phoenixproject.data.repository.ExerciseVideoEntity
-import com.devil.phoenixproject.domain.model.*
+import com.devil.phoenixproject.domain.model.ConnectionState
+import com.devil.phoenixproject.domain.model.EchoLevel
+import com.devil.phoenixproject.domain.model.ProgramMode
+import com.devil.phoenixproject.domain.model.RoutineFlowState
+import com.devil.phoenixproject.domain.model.WeightUnit
+import com.devil.phoenixproject.domain.model.WorkoutState
+import com.devil.phoenixproject.domain.usecase.BodyweightVolumeCalculator
 import com.devil.phoenixproject.presentation.components.BackHandler
 import com.devil.phoenixproject.presentation.components.SliderWithButtons
 import com.devil.phoenixproject.presentation.components.VideoPlayer
 import com.devil.phoenixproject.presentation.navigation.NavigationRoutes
 import com.devil.phoenixproject.presentation.viewmodel.MainViewModel
 import com.devil.phoenixproject.ui.theme.Spacing
+import com.devil.phoenixproject.util.Constants
 import org.jetbrains.compose.resources.stringResource
-import vitruvianprojectphoenix.shared.generated.resources.*
 import vitruvianprojectphoenix.shared.generated.resources.Res
+import vitruvianprojectphoenix.shared.generated.resources.action_cancel
+import vitruvianprojectphoenix.shared.generated.resources.action_exit
+import vitruvianprojectphoenix.shared.generated.resources.cd_next
+import vitruvianprojectphoenix.shared.generated.resources.cd_previous
+import vitruvianprojectphoenix.shared.generated.resources.cd_stop
+import vitruvianprojectphoenix.shared.generated.resources.exit_routine_message
+import vitruvianprojectphoenix.shared.generated.resources.exit_routine_title
+import vitruvianprojectphoenix.shared.generated.resources.target_reps
 
 /**
  * Set Ready Screen - Focused view for a single exercise/set.
@@ -68,8 +118,8 @@ fun SetReadyScreen(navController: NavController, viewModel: MainViewModel, exerc
     val isBodyweight = !currentExercise.exercise.hasCableAccessory
 
     // Weight parameters matching RestTimerCard exactly
-    val maxWeight = if (weightUnit == WeightUnit.LB) 242f else 110f // 110kg per cable max
-    val weightStep = if (weightUnit == WeightUnit.LB) 0.5f else 0.25f // Fine-grained like RestTimerCard
+    val maxWeightKg = Constants.MAX_WEIGHT_PER_CABLE_KG
+    val weightStepKg = 0.25f
 
     // Navigation state - uses superset-aware helpers from ViewModel
     val canGoPrev = viewModel.hasPreviousStep(setReadyState.exerciseIndex, setReadyState.setIndex)
@@ -284,6 +334,88 @@ fun SetReadyScreen(navController: NavController, viewModel: MainViewModel, exerc
                 Spacer(Modifier.height(12.dp))
             }
 
+            // Issue #229: Bodyweight variant picker (transient, not persisted)
+            if (isBodyweight) {
+                val variants = remember(currentExercise.exercise.name) {
+                    BodyweightVolumeCalculator.getVariantsForExercise(currentExercise.exercise.name)
+                }
+                if (variants != null && variants.size > 1) {
+                    var expanded by remember { mutableStateOf(false) }
+                    var selectedVariant by remember { mutableStateOf(variants[0]) }
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        ),
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(Spacing.medium),
+                        ) {
+                            Text(
+                                "Exercise Variant",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            ExposedDropdownMenuBox(
+                                expanded = expanded,
+                                onExpandedChange = { expanded = it },
+                            ) {
+                                OutlinedTextField(
+                                    value = selectedVariant.first,
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                                    modifier = Modifier
+                                        .menuAnchor()
+                                        .fillMaxWidth(),
+                                    singleLine = true,
+                                )
+                                ExposedDropdownMenu(
+                                    expanded = expanded,
+                                    onDismissRequest = { expanded = false },
+                                ) {
+                                    variants.forEach { variant ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    "${variant.first} (${(variant.second * 100).toInt()}%)",
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                )
+                                            },
+                                            onClick = {
+                                                selectedVariant = variant
+                                                expanded = false
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                            val userPrefs by viewModel.userPreferences.collectAsState()
+                            if (userPrefs.bodyWeightKg > 0f) {
+                                val effectiveKg = userPrefs.bodyWeightKg * selectedVariant.second
+                                val displayWeight = if (weightUnit == WeightUnit.KG) {
+                                    "${com.devil.phoenixproject.util.UnitConverter.formatDecimal(effectiveKg)} kg"
+                                } else {
+                                    "${com.devil.phoenixproject.util.UnitConverter.formatDecimal(com.devil.phoenixproject.util.UnitConverter.kgToLb(effectiveKg))} lb"
+                                }
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    "Effective load: $displayWeight",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                }
+            }
+
             // Configuration card - matching RestTimerCard style
             // Issue #222: Hide for bodyweight exercises (no cable settings to configure)
             if (!isBodyweight) {
@@ -349,15 +481,27 @@ fun SetReadyScreen(navController: NavController, viewModel: MainViewModel, exerc
                             }
                         } else {
                             // Standard mode: Weight + Reps using SliderWithButtons
+                            // Delta from routine baseline
+                            val baselineWeightKg = currentExercise.setWeightsPerCableKg.getOrNull(setReadyState.setIndex)
+                                ?: currentExercise.weightPerCableKg
+                            val deltaKg = setReadyState.adjustedWeight - baselineWeightKg
+                            val deltaText = if (kotlin.math.abs(deltaKg) > 0.01f) {
+                                val sign = if (deltaKg > 0) "+" else "-"
+                                val absDeltaFormatted = viewModel.formatWeight(kotlin.math.abs(deltaKg), weightUnit)
+                                "${sign}${absDeltaFormatted}"
+                            } else null
+
                             SliderWithButtons(
                                 value = setReadyState.adjustedWeight,
                                 onValueChange = { newWeight ->
-                                    viewModel.updateSetReadyWeight(newWeight.coerceIn(0f, maxWeight))
+                                    viewModel.updateSetReadyWeight(newWeight.coerceIn(0f, maxWeightKg))
                                 },
-                                valueRange = 0f..maxWeight,
-                                step = weightStep,
+                                valueRange = 0f..maxWeightKg,
+                                step = weightStepKg,
                                 label = "Weight per cable",
                                 formatValue = { viewModel.formatWeight(it, weightUnit) },
+                                deltaText = deltaText,
+                                isDeltaPositive = deltaKg >= 0f,
                             )
 
                             if (!isAMRAP) {

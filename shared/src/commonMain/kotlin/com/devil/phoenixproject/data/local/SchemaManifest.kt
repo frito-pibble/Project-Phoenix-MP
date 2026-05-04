@@ -497,13 +497,14 @@ internal val manifestTables: List<SchemaTableOperation> = listOf(
     // because applyColumnHeal handles "duplicate column" errors gracefully.
 
     // Exercise -- initial schema, full current shape
-    // Columns added by later migrations: one_rep_max_kg (m1), updatedAt/serverId/deletedAt (m11)
+    // Columns added by later migrations: one_rep_max_kg (m1), updatedAt/serverId/deletedAt (m11), displayName (m30)
     SchemaTableOperation(
         table = "Exercise",
         createSql = """
             CREATE TABLE IF NOT EXISTS Exercise (
                 id TEXT NOT NULL PRIMARY KEY,
                 name TEXT NOT NULL,
+                displayName TEXT,
                 description TEXT,
                 created INTEGER NOT NULL DEFAULT 0,
                 muscleGroup TEXT NOT NULL,
@@ -604,7 +605,8 @@ internal val manifestTables: List<SchemaTableOperation> = listOf(
                 updatedAt INTEGER,
                 serverId TEXT,
                 deletedAt INTEGER,
-                profile_id TEXT NOT NULL DEFAULT 'default'
+                profile_id TEXT NOT NULL DEFAULT 'default',
+                display_multiplier INTEGER
             )
         """.trimIndent(),
     ),
@@ -650,13 +652,14 @@ internal val manifestTables: List<SchemaTableOperation> = listOf(
                 updatedAt INTEGER,
                 serverId TEXT,
                 deletedAt INTEGER,
-                profile_id TEXT NOT NULL DEFAULT 'default'
+                profile_id TEXT NOT NULL DEFAULT 'default',
+                cable_count INTEGER
             )
         """.trimIndent(),
     ),
 
     // Routine -- initial schema, full current shape
-    // Columns added by later migrations: sync fields (m11), profile_id (m21)
+    // Columns added by later migrations: sync fields (m11), profile_id (m21), groupId (m27)
     SchemaTableOperation(
         table = "Routine",
         createSql = """
@@ -670,7 +673,8 @@ internal val manifestTables: List<SchemaTableOperation> = listOf(
                 updatedAt INTEGER,
                 serverId TEXT,
                 deletedAt INTEGER,
-                profile_id TEXT NOT NULL DEFAULT 'default'
+                profile_id TEXT NOT NULL DEFAULT 'default',
+                groupId TEXT REFERENCES RoutineGroup(id) ON DELETE SET NULL
             )
         """.trimIndent(),
     ),
@@ -901,6 +905,21 @@ internal val manifestTables: List<SchemaTableOperation> = listOf(
             )
         """.trimIndent(),
     ),
+
+    // RoutineGroup -- introduced by migration 27.sqm (Phase 39).
+    // Parent grouping for daily routines. Local-only (not synced).
+    SchemaTableOperation(
+        table = "RoutineGroup",
+        createSql = """
+            CREATE TABLE IF NOT EXISTS RoutineGroup (
+                id TEXT PRIMARY KEY NOT NULL,
+                name TEXT NOT NULL,
+                orderIndex INTEGER NOT NULL DEFAULT 0,
+                createdAt INTEGER NOT NULL,
+                profile_id TEXT NOT NULL DEFAULT 'default'
+            )
+        """.trimIndent(),
+    ),
 )
 
 // ============================================================
@@ -913,7 +932,7 @@ internal val manifestTables: List<SchemaTableOperation> = listOf(
 // ============================================================
 
 internal val manifestColumns: List<SchemaHealOperation> = listOf(
-    // ── Exercise (4 columns) ────────────────────────────────────────────
+    // ── Exercise (5 columns) ────────────────────────────────────────────
 
     // Migration 1: one_rep_max_kg
     SchemaHealOperation("Exercise", "one_rep_max_kg", "ALTER TABLE Exercise ADD COLUMN one_rep_max_kg REAL DEFAULT NULL"),
@@ -921,6 +940,8 @@ internal val manifestColumns: List<SchemaHealOperation> = listOf(
     SchemaHealOperation("Exercise", "updatedAt", "ALTER TABLE Exercise ADD COLUMN updatedAt INTEGER"),
     SchemaHealOperation("Exercise", "serverId", "ALTER TABLE Exercise ADD COLUMN serverId TEXT"),
     SchemaHealOperation("Exercise", "deletedAt", "ALTER TABLE Exercise ADD COLUMN deletedAt INTEGER"),
+    // Migration 30: display name
+    SchemaHealOperation("Exercise", "displayName", "ALTER TABLE Exercise ADD COLUMN displayName TEXT"),
 
     // ── WorkoutSession (31 columns) ─────────────────────────────────────
 
@@ -962,8 +983,10 @@ internal val manifestColumns: List<SchemaHealOperation> = listOf(
     SchemaHealOperation("WorkoutSession", "cableCount", "ALTER TABLE WorkoutSession ADD COLUMN cableCount INTEGER"),
     // Migration 21: multi-profile support
     SchemaHealOperation("WorkoutSession", "profile_id", "ALTER TABLE WorkoutSession ADD COLUMN profile_id TEXT NOT NULL DEFAULT 'default'"),
+    // Migration 29: display_multiplier for equipment-aware weight display
+    SchemaHealOperation("WorkoutSession", "display_multiplier", "ALTER TABLE WorkoutSession ADD COLUMN display_multiplier INTEGER"),
 
-    // ── PersonalRecord (5 columns) ──────────────────────────────────────
+    // ── PersonalRecord (6 columns) ──────────────────────────────────────
 
     // Migration 11: sync fields
     SchemaHealOperation("PersonalRecord", "updatedAt", "ALTER TABLE PersonalRecord ADD COLUMN updatedAt INTEGER"),
@@ -973,6 +996,8 @@ internal val manifestColumns: List<SchemaHealOperation> = listOf(
     SchemaHealOperation("PersonalRecord", "phase", "ALTER TABLE PersonalRecord ADD COLUMN phase TEXT NOT NULL DEFAULT 'COMBINED'"),
     // Migration 21: multi-profile support
     SchemaHealOperation("PersonalRecord", "profile_id", "ALTER TABLE PersonalRecord ADD COLUMN profile_id TEXT NOT NULL DEFAULT 'default'"),
+    // Migration 28: cable-aware weight display
+    SchemaHealOperation("PersonalRecord", "cable_count", "ALTER TABLE PersonalRecord ADD COLUMN cable_count INTEGER"),
 
     // ── Routine (4 columns) ─────────────────────────────────────────────
 
@@ -1052,6 +1077,10 @@ internal val manifestColumns: List<SchemaHealOperation> = listOf(
 
     // Migration 22: multi-profile support
     SchemaHealOperation("RpgAttributes", "profile_id", "ALTER TABLE RpgAttributes ADD COLUMN profile_id TEXT NOT NULL DEFAULT 'default'"),
+
+    // ── Routine (1 column, migration 27) ───────────────────────────────
+    // Migration 27: routine grouping
+    SchemaHealOperation("Routine", "groupId", "ALTER TABLE Routine ADD COLUMN groupId TEXT REFERENCES RoutineGroup(id) ON DELETE SET NULL"),
 )
 
 // ============================================================
@@ -1162,4 +1191,7 @@ internal val manifestIndexes: List<SchemaIndexOperation> = listOf(
 
     // ── SessionNotes (Phase 3.5, migration 26.sqm) ──────────────────────
     SchemaIndexOperation("idx_session_notes_updated_at", "CREATE INDEX IF NOT EXISTS idx_session_notes_updated_at ON SessionNotes(updatedAt)"),
+
+    // ── RoutineGroup (Phase 39, migration 27.sqm) ──────────────────────
+    SchemaIndexOperation("idx_routine_group_profile", "CREATE INDEX IF NOT EXISTS idx_routine_group_profile ON RoutineGroup(profile_id)"),
 )

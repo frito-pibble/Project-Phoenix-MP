@@ -119,6 +119,7 @@ class ConflictResolutionTest {
             lastUsed = null,
             useCount = 5L,
             profile_id = testProfileId,
+            groupId = null,
         )
         // Set updatedAt by re-inserting with full upsert that preserves the timestamp
         // For this test, we simulate the scenario by inserting a routine where
@@ -198,6 +199,7 @@ class ConflictResolutionTest {
             lastUsed = null,
             useCount = 0L,
             profile_id = testProfileId,
+            groupId = null,
         )
         // Add a local exercise
         database.vitruvianDatabaseQueries.insertRoutineExercise(
@@ -484,6 +486,7 @@ class ConflictResolutionTest {
             volume = 500.0,
             phase = "COMBINED",
             profile_id = testProfileId,
+            cable_count = null,
         )
 
         val prBefore = database.vitruvianDatabaseQueries.selectPR(
@@ -649,6 +652,7 @@ class ConflictResolutionTest {
             formScore = null,
             updatedAt = session.timestamp,
             profile_id = session.profileId,
+            display_multiplier = null,
         )
     }
 }

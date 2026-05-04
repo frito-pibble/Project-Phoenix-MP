@@ -30,19 +30,21 @@ data class Exercise(
     val timesPerformed: Int = 0, // Number of times this exercise has been performed
     val oneRepMaxKg: Float? = null, // User's 1RM for percentage-based programming
     val cableIntent: ExerciseCableIntent? = null, // Explicit single/dual cable metadata when known
+    val displayName: String = name, // Disambiguated name from catalog; defaults to base name
 ) {
-    /**
-     * Display name for UI (same as name for now)
-     */
-    val displayName: String
-        get() = name
-
     /**
      * Whether this exercise uses any cable accessory (handles, bar, rope, etc.).
      * Exercises with only non-cable equipment (e.g., bench) or no equipment are bodyweight.
      */
     val hasCableAccessory: Boolean
         get() = equipment.split(",").any { it.trim().uppercase() in CABLE_ACCESSORIES }
+
+    /**
+     * Whether this is a bodyweight exercise (no cable accessories attached).
+     * Inverse of [hasCableAccessory] for readability at call sites.
+     */
+    val isBodyweight: Boolean
+        get() = !hasCableAccessory
 
     /**
      * Preferred cable count for summary calculations when the exercise metadata is explicit.
@@ -52,6 +54,31 @@ data class Exercise(
         get() = when (cableIntent) {
             ExerciseCableIntent.SINGLE -> 1
             ExerciseCableIntent.DUAL -> 2
+            ExerciseCableIntent.EITHER, null -> null
+        }
+
+    /**
+     * Whether this exercise uses a unified attachment (long bar or belt) connecting both cables.
+     * Only BAR and BELT create a single combined load from both cables.
+     * HANDLES, ROPE, SHORT_BAR, STRAPS are individual per-cable attachments.
+     */
+    val usesUnifiedAttachment: Boolean
+        get() {
+            val equipmentParts = equipment.split(",").map { it.trim().uppercase() }
+            return equipmentParts.any { it == "BAR" || it == "BELT" }
+        }
+
+    /**
+     * Display multiplier for weight presentation.
+     * Returns 2 only when exercise uses dual cables with a unified attachment (BAR/BELT).
+     * Individual-handle dual exercises (e.g., bicep curls with HANDLES) return 1
+     * because each arm lifts per-cable weight independently.
+     * Null when cable intent is unknown (EITHER or null) -- let caller decide.
+     */
+    val displayMultiplier: Int?
+        get() = when (cableIntent) {
+            ExerciseCableIntent.SINGLE -> 1
+            ExerciseCableIntent.DUAL -> if (usesUnifiedAttachment) 2 else 1
             ExerciseCableIntent.EITHER, null -> null
         }
 

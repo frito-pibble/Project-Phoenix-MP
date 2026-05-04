@@ -111,6 +111,7 @@ class SqlDelightCompletedSetRepositoryTest {
             lastUsed = null,
             useCount = 0L,
             profile_id = "default",
+            groupId = null,
         )
     }
 
@@ -200,6 +201,7 @@ class SqlDelightCompletedSetRepositoryTest {
             strengthProfile = null,
             formScore = null,
             profile_id = "default",
+            display_multiplier = null,
         )
     }
 }

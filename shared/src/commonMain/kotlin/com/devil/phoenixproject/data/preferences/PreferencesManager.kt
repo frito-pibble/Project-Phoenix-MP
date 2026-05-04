@@ -3,6 +3,8 @@ package com.devil.phoenixproject.data.preferences
 import com.devil.phoenixproject.domain.model.RepCountTiming
 import com.devil.phoenixproject.domain.model.UserPreferences
 import com.devil.phoenixproject.domain.model.WeightUnit
+import com.devil.phoenixproject.util.BackupDestination
+import com.devil.phoenixproject.util.BackupDestination.Companion.toJson
 import com.russhwolf.settings.Settings
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -129,6 +131,9 @@ interface PreferencesManager {
     // Issue #293: Per-session auto-backup
     suspend fun setAutoBackupEnabled(enabled: Boolean)
 
+    // Issue #293: Custom backup destination
+    suspend fun setBackupDestination(destination: BackupDestination)
+
     // Issue #238: Language/locale preference
     suspend fun setLanguage(language: String)
 
@@ -136,6 +141,10 @@ interface PreferencesManager {
     suspend fun setVoiceStopEnabled(enabled: Boolean)
     suspend fun setSafeWord(word: String?)
     suspend fun setSafeWordCalibrated(calibrated: Boolean)
+
+    // Issue #313: Velocity-Based Training (VBT)
+    suspend fun setVelocityLossThreshold(percent: Int)
+    suspend fun setAutoEndOnVelocityLoss(enabled: Boolean)
 
     suspend fun getSingleExerciseDefaults(exerciseId: String): SingleExerciseDefaults?
     suspend fun saveSingleExerciseDefaults(defaults: SingleExerciseDefaults)
@@ -185,10 +194,13 @@ class SettingsPreferencesManager(private val settings: Settings) : PreferencesMa
         private const val KEY_REP_SOUND_ENABLED = "rep_sound_enabled"
         private const val KEY_MOTION_START = "motion_start_enabled"
         private const val KEY_AUTO_BACKUP_ENABLED = "auto_backup_enabled"
+        private const val KEY_BACKUP_DESTINATION = "backup_destination"
         private const val KEY_LANGUAGE = "language"
         private const val KEY_VOICE_STOP_ENABLED = "voice_stop_enabled"
         private const val KEY_SAFE_WORD = "safe_word"
         private const val KEY_SAFE_WORD_CALIBRATED = "safe_word_calibrated"
+        private const val KEY_VELOCITY_LOSS_THRESHOLD = "velocity_loss_threshold_percent"
+        private const val KEY_AUTO_END_VELOCITY_LOSS = "auto_end_on_velocity_loss"
 
         // Permissions onboarding (health + microphone)
         private const val KEY_PERMISSIONS_ONBOARDING_SHOWN = "permissions_onboarding_shown"
@@ -230,10 +242,13 @@ class SettingsPreferencesManager(private val settings: Settings) : PreferencesMa
             repSoundEnabled = settings.getBoolean(KEY_REP_SOUND_ENABLED, true),
             motionStartEnabled = settings.getBoolean(KEY_MOTION_START, false),
             autoBackupEnabled = settings.getBoolean(KEY_AUTO_BACKUP_ENABLED, false),
+            backupDestination = BackupDestination.fromJson(settings.getStringOrNull(KEY_BACKUP_DESTINATION)),
             language = settings.getStringOrNull(KEY_LANGUAGE) ?: "en",
             voiceStopEnabled = settings.getBoolean(KEY_VOICE_STOP_ENABLED, false),
             safeWord = settings.getStringOrNull(KEY_SAFE_WORD),
             safeWordCalibrated = settings.getBoolean(KEY_SAFE_WORD_CALIBRATED, false),
+            velocityLossThresholdPercent = settings.getInt(KEY_VELOCITY_LOSS_THRESHOLD, 20).coerceIn(10, 50),
+            autoEndOnVelocityLoss = settings.getBoolean(KEY_AUTO_END_VELOCITY_LOSS, false),
         )
     }
 
@@ -402,6 +417,11 @@ class SettingsPreferencesManager(private val settings: Settings) : PreferencesMa
         updateAndEmit { copy(autoBackupEnabled = enabled) }
     }
 
+    override suspend fun setBackupDestination(destination: BackupDestination) {
+        settings.putString(KEY_BACKUP_DESTINATION, destination.toJson())
+        updateAndEmit { copy(backupDestination = destination) }
+    }
+
     override suspend fun setLanguage(language: String) {
         settings.putString(KEY_LANGUAGE, language)
         updateAndEmit { copy(language = language) }
@@ -424,5 +444,16 @@ class SettingsPreferencesManager(private val settings: Settings) : PreferencesMa
     override suspend fun setSafeWordCalibrated(calibrated: Boolean) {
         settings.putBoolean(KEY_SAFE_WORD_CALIBRATED, calibrated)
         updateAndEmit { copy(safeWordCalibrated = calibrated) }
+    }
+
+    override suspend fun setVelocityLossThreshold(percent: Int) {
+        val clamped = percent.coerceIn(10, 50)
+        settings.putInt(KEY_VELOCITY_LOSS_THRESHOLD, clamped)
+        updateAndEmit { copy(velocityLossThresholdPercent = clamped) }
+    }
+
+    override suspend fun setAutoEndOnVelocityLoss(enabled: Boolean) {
+        settings.putBoolean(KEY_AUTO_END_VELOCITY_LOSS, enabled)
+        updateAndEmit { copy(autoEndOnVelocityLoss = enabled) }
     }
 }

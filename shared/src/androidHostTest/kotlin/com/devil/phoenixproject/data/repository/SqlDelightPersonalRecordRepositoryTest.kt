@@ -122,6 +122,7 @@ class SqlDelightPersonalRecordRepositoryTest {
             volume = 440.0,
             phase = "COMBINED",
             profile_id = "default",
+            cable_count = null,
         )
 
         val canonical = repository.getWeightPR("bench", "Old School", profileId = "default")
@@ -157,7 +158,7 @@ class SqlDelightPersonalRecordRepositoryTest {
         val testRepo = SqlDelightPersonalRecordRepository(testDb)
 
         testDb.vitruvianDatabaseQueries.insertExercise(
-            id = "squat", name = "Squat", description = null,
+            id = "squat", name = "Squat", displayName = null, description = null,
             created = 0L, muscleGroup = "Legs", muscleGroups = "Legs",
             muscles = null, equipment = "BAR", movement = null,
             sidedness = null, grip = null, gripWidth = null,
@@ -228,6 +229,7 @@ class SqlDelightPersonalRecordRepositoryTest {
         database.vitruvianDatabaseQueries.insertExercise(
             id = id,
             name = name,
+            displayName = null,
             description = null,
             created = 0L,
             muscleGroup = "Chest",

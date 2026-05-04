@@ -27,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -61,13 +62,17 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import co.touchlab.kermit.Logger
 import com.devil.phoenixproject.data.repository.ExerciseRepository
 import com.devil.phoenixproject.data.repository.ExerciseVideoEntity
+import com.devil.phoenixproject.domain.model.ConnectionState
 import com.devil.phoenixproject.domain.model.EchoLevel
 import com.devil.phoenixproject.domain.model.ProgramMode
 import com.devil.phoenixproject.domain.model.RoutineExercise
 import com.devil.phoenixproject.domain.model.RoutineFlowState
 import com.devil.phoenixproject.domain.model.WeightUnit
+import com.devil.phoenixproject.domain.usecase.RoutineTimeEstimate
+import com.devil.phoenixproject.domain.usecase.RoutineTimeEstimator
 import com.devil.phoenixproject.presentation.components.BackHandler
 import com.devil.phoenixproject.presentation.components.SliderWithButtons
 import com.devil.phoenixproject.presentation.components.VideoPlayer
@@ -78,7 +83,9 @@ import com.devil.phoenixproject.presentation.util.WindowHeightSizeClass
 import com.devil.phoenixproject.presentation.util.WindowWidthSizeClass
 import com.devil.phoenixproject.presentation.viewmodel.MainViewModel
 import com.devil.phoenixproject.ui.theme.Spacing
+import com.devil.phoenixproject.util.Constants
 import org.jetbrains.compose.resources.stringResource
+import org.koin.compose.koinInject
 import vitruvianprojectphoenix.shared.generated.resources.Res
 import vitruvianprojectphoenix.shared.generated.resources.action_cancel
 import vitruvianprojectphoenix.shared.generated.resources.action_exit
@@ -100,6 +107,8 @@ fun RoutineOverviewScreen(navController: NavController, viewModel: MainViewModel
     val completedExercises by viewModel.completedExercises.collectAsState()
     val weightUnit by viewModel.weightUnit.collectAsState()
     val enableVideoPlayback by viewModel.enableVideoPlayback.collectAsState()
+    val userPreferences by viewModel.userPreferences.collectAsState()
+    val connectionState by viewModel.connectionState.collectAsState()
 
     // Get the current routine from flow state
     val routine = when (val state = routineFlowState) {
@@ -112,6 +121,28 @@ fun RoutineOverviewScreen(navController: NavController, viewModel: MainViewModel
     // Auto-navigating causes double-back issues when exitRoutineFlow() clears the routine
     if (routine == null) {
         return
+    }
+
+    // Issue #190: Auto-start routine — skip overview and enter SetReady for exercise 0
+    // Uses a one-shot flag to prevent re-triggering on recomposition or back-navigation.
+    // Guard conditions: pref enabled, routine non-empty, BLE connected, no resumable progress.
+    var autoStartFired by remember { mutableStateOf(false) }
+    LaunchedEffect(routine.id, userPreferences.autoStartRoutine) {
+        if (
+            !autoStartFired &&
+            userPreferences.autoStartRoutine &&
+            routine.exercises.isNotEmpty() &&
+            connectionState is ConnectionState.Connected &&
+            !viewModel.hasResumableProgress(routine.id)
+        ) {
+            autoStartFired = true
+            Logger.d("AutoStart") { "AutoStart: skipping overview, entering SetReady for exercise 0" }
+            val firstExercise = routine.exercises[0]
+            val initialWeight = firstExercise.setWeightsPerCableKg.firstOrNull() ?: firstExercise.weightPerCableKg
+            val initialReps = firstExercise.setReps.firstOrNull() ?: 10
+            viewModel.enterSetReadyWithAdjustments(0, 0, initialWeight, initialReps)
+            navController.navigate(NavigationRoutes.SetReady.route)
+        }
     }
 
     val pagerState = rememberPagerState(
@@ -133,6 +164,17 @@ fun RoutineOverviewScreen(navController: NavController, viewModel: MainViewModel
     // Sync pager with viewmodel
     LaunchedEffect(pagerState.currentPage) {
         viewModel.selectExerciseInOverview(pagerState.currentPage)
+    }
+
+    // Time estimate (Issue #225)
+    val timeEstimator: RoutineTimeEstimator = koinInject()
+    var timeEstimate by remember { mutableStateOf<RoutineTimeEstimate?>(null) }
+    LaunchedEffect(routine) {
+        try {
+            timeEstimate = timeEstimator.estimateRoutineDuration(routine, routine.profileId)
+        } catch (e: Exception) {
+            Logger.w(e) { "Failed to compute routine time estimate" }
+        }
     }
 
     // Stop routine confirmation dialog
@@ -187,6 +229,37 @@ fun RoutineOverviewScreen(navController: NavController, viewModel: MainViewModel
                     ),
                 ),
         ) {
+            // Time estimate badge (Issue #225)
+            timeEstimate?.let { estimate ->
+                if (routine.exercises.isNotEmpty() && estimate.totalSeconds > 0) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Default.Schedule,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        val displayText = buildString {
+                            append("Est. ")
+                            append(if (estimate.hasRange) estimate.formattedRange else estimate.formattedDuration)
+                            if (estimate.isEntirelyFallback) append(" (est.)")
+                        }
+                        Text(
+                            text = displayText,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
             // Horizontal pager for exercises
             HorizontalPager(
                 state = pagerState,
@@ -455,9 +528,8 @@ private fun ExerciseOverviewCard(
     onEchoLevelChange: (EchoLevel) -> Unit,
     onEccentricLoadChange: (Int) -> Unit,
 ) {
-    // Weight parameters matching RestTimerCard exactly
-    val maxWeight = if (weightUnit == WeightUnit.LB) 242f else 110f // 110kg per cable max
-    val weightStep = if (weightUnit == WeightUnit.LB) 0.5f else 0.25f // Fine-grained like RestTimerCard
+    val maxWeightKg = Constants.MAX_WEIGHT_PER_CABLE_KG
+    val weightStepKg = 0.25f
 
     // Bodyweight = no cable accessories (handles, bar, rope, etc.) in equipment list
     val isBodyweight = !exercise.exercise.hasCableAccessory
@@ -605,15 +677,27 @@ private fun ExerciseOverviewCard(
                                 }
                             } else {
                                 // Standard modes: Weight + Reps
+                                // Delta from routine baseline
+                                val baselineWeightKg = exercise.setWeightsPerCableKg.firstOrNull()
+                                    ?: exercise.weightPerCableKg
+                                val deltaKg = adjustedWeight - baselineWeightKg
+                                val deltaText = if (kotlin.math.abs(deltaKg) > 0.01f) {
+                                    val sign = if (deltaKg > 0) "+" else "-"
+                                    val absDeltaFormatted = formatWeight(kotlin.math.abs(deltaKg), weightUnit)
+                                    "${sign}${absDeltaFormatted}"
+                                } else null
+
                                 SliderWithButtons(
                                     value = adjustedWeight,
                                     onValueChange = { newWeight ->
-                                        onWeightChange(newWeight.coerceIn(0f, maxWeight))
+                                        onWeightChange(newWeight.coerceIn(0f, maxWeightKg))
                                     },
-                                    valueRange = 0f..maxWeight,
-                                    step = weightStep,
+                                    valueRange = 0f..maxWeightKg,
+                                    step = weightStepKg,
                                     label = "Weight per cable",
                                     formatValue = { formatWeight(it, weightUnit) },
+                                    deltaText = deltaText,
+                                    isDeltaPositive = deltaKg >= 0f,
                                 )
 
                                 // Reps adjuster (or AMRAP indicator)

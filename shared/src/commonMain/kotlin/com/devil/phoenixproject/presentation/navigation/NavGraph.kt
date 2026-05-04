@@ -25,6 +25,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import androidx.savedstate.read
 import com.devil.phoenixproject.data.repository.ExerciseRepository
+import com.devil.phoenixproject.util.BackupDestination
 import com.devil.phoenixproject.data.repository.TrainingCycleRepository
 import com.devil.phoenixproject.domain.model.TrainingCycle
 import com.devil.phoenixproject.presentation.screen.*
@@ -307,6 +308,8 @@ fun NavGraph(
                     onRepSoundChange = { viewModel.setRepSoundEnabled(it) },
                     motionStartEnabled = userPreferences.motionStartEnabled,
                     onMotionStartChange = { viewModel.setMotionStartEnabled(it) },
+                    autoStartRoutine = userPreferences.autoStartRoutine,
+                    onAutoStartRoutineChange = { viewModel.setAutoStartRoutine(it) },
                     summaryCountdownSeconds = userPreferences.summaryCountdownSeconds,
                     autoStartCountdownSeconds = userPreferences.autoStartCountdownSeconds,
                     selectedColorSchemeIndex = userPreferences.colorScheme,
@@ -343,6 +346,9 @@ fun NavGraph(
                     onAutoBackupEnabledChange = { viewModel.setAutoBackupEnabled(it) },
                     backupStats = backupStats,
                     onOpenBackupFolder = { viewModel.openBackupFolder() },
+                    // Custom backup destination (Phase 42)
+                    backupDestination = userPreferences.backupDestination,
+                    onBackupDestinationChange = { viewModel.setBackupDestination(it) },
                     // Language preference
                     selectedLanguage = userPreferences.language,
                     onLanguageChange = { viewModel.setLanguage(it) },
@@ -353,6 +359,18 @@ fun NavGraph(
                     onSafeWordChange = { viewModel.setSafeWord(it) },
                     safeWordCalibrated = userPreferences.safeWordCalibrated,
                     onSafeWordCalibratedChange = { viewModel.setSafeWordCalibrated(it) },
+                    // Issue #266: Configurable weight increment
+                    weightIncrement = userPreferences.weightIncrement,
+                    onWeightIncrementChange = { viewModel.setWeightIncrement(it) },
+                    // Issue #229: Body weight for bodyweight exercise volume
+                    bodyWeightKg = userPreferences.bodyWeightKg,
+                    onBodyWeightKgChange = { viewModel.setBodyWeightKg(it) },
+                    // Issue #313: VBT power loss threshold
+                    velocityLossThresholdPercent = userPreferences.velocityLossThresholdPercent,
+                    onVelocityLossThresholdChange = { viewModel.setVelocityLossThreshold(it) },
+                    autoEndOnVelocityLoss = userPreferences.autoEndOnVelocityLoss,
+                    onAutoEndOnVelocityLossChange = { viewModel.setAutoEndOnVelocityLoss(it) },
+                    stallDetectionEnabled = userPreferences.stallDetectionEnabled,
                 )
             }
 

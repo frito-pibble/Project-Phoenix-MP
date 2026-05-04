@@ -92,8 +92,10 @@ private class IosSoundManager {
     private fun loadSounds() {
         // Map events to sound file names (without extension)
         // Note: Using sealed class data objects as map keys (they have proper equals/hashCode)
+        // Issue #100: Sound files converted from .ogg → .caf via iosApp/convert_sounds.sh
         val soundFiles: Map<HapticEvent, String> = mapOf(
-            HapticEvent.REP_COMPLETED to "beep",
+            HapticEvent.REP_COMPLETED to "chirpchirp", // Issue #100: More audible than beep
+            HapticEvent.FINAL_REP to "boopbeepbeep", // Issue #100: Distinct final rep sound
             HapticEvent.WARMUP_COMPLETE to "beepboop",
             HapticEvent.WORKOUT_COMPLETE to "boopbeepbeep",
             HapticEvent.WORKOUT_START to "chirpchirp",
@@ -102,6 +104,8 @@ private class IosSoundManager {
             HapticEvent.DISCO_MODE_UNLOCKED to "discomode",
             // Issue #100: Warmup-to-working transition (ascending tone)
             HapticEvent.WARMUP_TO_WORKING to "beepboop",
+            // Issue #313: Velocity loss threshold alert (attention-getting)
+            HapticEvent.VELOCITY_THRESHOLD_REACHED to "boopbeepbeep",
             // ERROR, BADGE_EARNED, PERSONAL_RECORD, REP_COUNT_ANNOUNCED, COUNTDOWN_TICK handled separately
         )
 
@@ -327,6 +331,13 @@ private fun playHapticFeedback(event: HapticEvent) {
                 generator.impactOccurred()
             }
 
+            is HapticEvent.FINAL_REP -> {
+                // Issue #100: Heavy impact for final rep — stands out from regular rep feedback
+                val generator = UIImpactFeedbackGenerator(UIImpactFeedbackStyle.UIImpactFeedbackStyleHeavy)
+                generator.prepare()
+                generator.impactOccurred()
+            }
+
             is HapticEvent.WARMUP_COMPLETE, is HapticEvent.WORKOUT_COMPLETE -> {
                 // Success notification for completions
                 val generator = UINotificationFeedbackGenerator()
@@ -378,6 +389,16 @@ private fun playHapticFeedback(event: HapticEvent) {
                 val generator = UIImpactFeedbackGenerator(UIImpactFeedbackStyle.UIImpactFeedbackStyleMedium)
                 generator.prepare()
                 generator.impactOccurred()
+            }
+
+            is HapticEvent.VELOCITY_THRESHOLD_REACHED -> {
+                // Issue #313: Heavy impact + warning notification for velocity threshold alert
+                val impactGenerator = UIImpactFeedbackGenerator(UIImpactFeedbackStyle.UIImpactFeedbackStyleHeavy)
+                impactGenerator.prepare()
+                impactGenerator.impactOccurred()
+                val notificationGenerator = UINotificationFeedbackGenerator()
+                notificationGenerator.prepare()
+                notificationGenerator.notificationOccurred(UINotificationFeedbackType.UINotificationFeedbackTypeWarning)
             }
 
             is HapticEvent.REP_COUNT_ANNOUNCED -> {

@@ -304,6 +304,7 @@ class DataBackupManagerRoutineNameTest {
             strengthProfile = null,
             formScore = null,
             profile_id = "default",
+            display_multiplier = null,
         )
 
         val backup = backupManager.exportAllData()
@@ -535,6 +536,7 @@ class DataBackupManagerRoutineNameTest {
             strengthProfile = null,
             formScore = null,
             profile_id = "userA",
+            display_multiplier = null,
         )
         queries.insertRoutine(
             id = "routine-existing",
@@ -544,6 +546,7 @@ class DataBackupManagerRoutineNameTest {
             lastUsed = null,
             useCount = 3,
             profile_id = "userA",
+            groupId = null,
         )
 
         // 3. Build a legacy backup with null profileId containing the same IDs
@@ -629,10 +632,12 @@ class DataBackupManagerRoutineNameTest {
             avgMcvMmS = null, avgAsymmetryPercent = null, totalVelocityLossPercent = null,
             dominantSide = null, strengthProfile = null, formScore = null,
             profile_id = "userB",
+            display_multiplier = null,
         )
         queries.insertRoutine(
             id = "routine-b", name = "Leg Day", description = "",
             createdAt = 1_700_000_000_000, lastUsed = null, useCount = 1, profile_id = "userB",
+            groupId = null,
         )
 
         // 3. Restore a backup that explicitly says these rows belong to "userB"

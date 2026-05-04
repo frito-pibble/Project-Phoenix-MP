@@ -64,7 +64,10 @@ actual fun HapticFeedbackEffect(hapticEvents: SharedFlow<HapticEvent>) {
     val soundIds = remember(soundPool) {
         mutableMapOf<HapticEvent, Int>().apply {
             try {
-                loadSoundByName(context, soundPool, "beep")?.let { put(HapticEvent.REP_COMPLETED, it) }
+                // Issue #100: chirpchirp is louder/more audible than beep for rep completion
+                loadSoundByName(context, soundPool, "chirpchirp")?.let { put(HapticEvent.REP_COMPLETED, it) }
+                // Issue #100: Distinct boopbeepbeep sound on final working rep
+                loadSoundByName(context, soundPool, "boopbeepbeep")?.let { put(HapticEvent.FINAL_REP, it) }
                 loadSoundByName(context, soundPool, "beepboop")?.let { put(HapticEvent.WARMUP_COMPLETE, it) }
                 loadSoundByName(context, soundPool, "boopbeepbeep")?.let { put(HapticEvent.WORKOUT_COMPLETE, it) }
                 loadSoundByName(context, soundPool, "chirpchirp")?.let { put(HapticEvent.WORKOUT_START, it) }
@@ -73,6 +76,8 @@ actual fun HapticFeedbackEffect(hapticEvents: SharedFlow<HapticEvent>) {
                 loadSoundByName(context, soundPool, "discomode")?.let { put(HapticEvent.DISCO_MODE_UNLOCKED, it) }
                 // Issue #100: Warmup-to-working transition (ascending tone)
                 loadSoundByName(context, soundPool, "beepboop")?.let { put(HapticEvent.WARMUP_TO_WORKING, it) }
+                // Issue #313: Velocity loss threshold alert (attention-getting)
+                loadSoundByName(context, soundPool, "boopbeepbeep")?.let { put(HapticEvent.VELOCITY_THRESHOLD_REACHED, it) }
             } catch (e: Exception) {
                 Logger.e(e) { "Failed to load sounds" }
             }
@@ -241,7 +246,8 @@ private fun playSound(
  */
 private fun playWithMediaPlayer(event: HapticEvent, context: Context) {
     val soundName = when (event) {
-        is HapticEvent.REP_COMPLETED -> "beep"
+        is HapticEvent.REP_COMPLETED -> "chirpchirp" // Issue #100: More audible than beep
+        is HapticEvent.FINAL_REP -> "boopbeepbeep" // Issue #100: Distinct final rep sound
         is HapticEvent.WARMUP_COMPLETE -> "beepboop"
         is HapticEvent.WORKOUT_COMPLETE -> "boopbeepbeep"
         is HapticEvent.WORKOUT_START -> "chirpchirp"
@@ -253,6 +259,7 @@ private fun playWithMediaPlayer(event: HapticEvent, context: Context) {
         is HapticEvent.REP_COUNT_ANNOUNCED -> "rep_%02d".format(event.repNumber)
         is HapticEvent.COUNTDOWN_TICK -> "beep"
         is HapticEvent.WARMUP_TO_WORKING -> "beepboop"
+        is HapticEvent.VELOCITY_THRESHOLD_REACHED -> "boopbeepbeep"
         is HapticEvent.ERROR -> return
     }
 
@@ -328,6 +335,15 @@ private fun playHapticFeedback(vibrator: Vibrator, event: HapticEvent) {
                 VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE)
             }
 
+            is HapticEvent.FINAL_REP -> {
+                // Issue #100: Stronger vibration for final rep — double pulse with escalating amplitude
+                VibrationEffect.createWaveform(
+                    longArrayOf(0, 80, 60, 120),
+                    intArrayOf(0, 200, 0, 255),
+                    -1,
+                )
+            }
+
             is HapticEvent.WARMUP_COMPLETE -> {
                 // Double pulse - strong
                 VibrationEffect.createWaveform(
@@ -396,6 +412,15 @@ private fun playHapticFeedback(vibrator: Vibrator, event: HapticEvent) {
                 )
             }
 
+            is HapticEvent.VELOCITY_THRESHOLD_REACHED -> {
+                // Issue #313: Strong alert — double heavy pulse for velocity threshold
+                VibrationEffect.createWaveform(
+                    longArrayOf(0, 120, 80, 150),
+                    intArrayOf(0, 255, 0, 255),
+                    -1,
+                )
+            }
+
             is HapticEvent.COUNTDOWN_TICK -> {
                 // Issue #100: Very light tick for rest countdown (last 10 seconds)
                 VibrationEffect.createOneShot(30, 80)
@@ -424,6 +449,11 @@ private fun playHapticFeedback(vibrator: Vibrator, event: HapticEvent) {
                 vibrator.vibrate(50)
             }
 
+            is HapticEvent.FINAL_REP -> {
+                // Issue #100: Stronger double pulse for final rep
+                vibrator.vibrate(longArrayOf(0, 80, 60, 120), -1)
+            }
+
             is HapticEvent.WARMUP_COMPLETE -> {
                 vibrator.vibrate(longArrayOf(0, 100, 100, 100), -1)
             }
@@ -450,6 +480,10 @@ private fun playHapticFeedback(vibrator: Vibrator, event: HapticEvent) {
 
             is HapticEvent.BADGE_EARNED, is HapticEvent.PERSONAL_RECORD -> {
                 vibrator.vibrate(longArrayOf(0, 100, 60, 120, 60, 150), -1)
+            }
+
+            is HapticEvent.VELOCITY_THRESHOLD_REACHED -> {
+                vibrator.vibrate(longArrayOf(0, 120, 80, 150), -1)
             }
 
             is HapticEvent.COUNTDOWN_TICK -> {

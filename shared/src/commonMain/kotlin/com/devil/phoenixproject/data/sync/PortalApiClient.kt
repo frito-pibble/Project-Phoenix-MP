@@ -615,8 +615,7 @@ open class PortalApiClient(private val supabaseConfig: SupabaseConfig, private v
         val token = ensureValidToken() ?: return Result.failure(
             PortalApiException("Not authenticated - please log in again", null, 401),
         )
-        // TEMP DIAGNOSTIC: Log token being used for request
-        Logger.e("PortalApiClient") { "AUTH REQUEST: tokenLen=${token.length}, prefix=${token.take(20)}" }
+        Logger.d("PortalApiClient") { "AUTH REQUEST: tokenLen=${token.length}" }
         return try {
             val response = block(token)
             if (response.status.value == 401) {

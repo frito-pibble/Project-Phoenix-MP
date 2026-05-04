@@ -33,11 +33,13 @@ import com.devil.phoenixproject.presentation.components.StableRepProgress
 import com.devil.phoenixproject.presentation.components.VideoPlayer
 import com.devil.phoenixproject.presentation.manager.DetectionState
 import com.devil.phoenixproject.presentation.util.LocalWindowSizeClass
+import com.devil.phoenixproject.presentation.util.WeightDisplayFormatter
 import com.devil.phoenixproject.presentation.util.ResponsiveDimensions
 import com.devil.phoenixproject.presentation.util.WindowWidthSizeClass
 import com.devil.phoenixproject.ui.theme.velocityZoneColor
 import com.devil.phoenixproject.ui.theme.velocityZoneLabel
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import vitruvianprojectphoenix.shared.generated.resources.*
@@ -79,6 +81,11 @@ fun WorkoutHud(
     detectionState: DetectionState = DetectionState(),
     onDetectionConfirmed: suspend (exerciseId: String, exerciseName: String) -> Unit = { _, _ -> },
     onDetectionDismissed: () -> Unit = {},
+    isExerciseTimerPaused: Boolean = false,
+    onPauseExerciseTimer: () -> Unit = {},
+    onResumeExerciseTimer: () -> Unit = {},
+    onResetExerciseTimer: () -> Unit = {},
+    velocityLossThresholdPercent: Int = 20,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -86,6 +93,10 @@ fun WorkoutHud(
     val isEchoMode = workoutParameters.isEchoMode
     val pagerState = rememberPagerState(pageCount = { 3 })
     val topBarModeLabel = if (isCurrentExerciseBodyweight) "Bodyweight" else workoutParameters.programMode.displayName
+
+    // Derive display multiplier from current exercise in loaded routine
+    val currentExerciseCableCount = loadedRoutine?.exercises?.getOrNull(currentExerciseIndex)
+        ?.exercise?.displayMultiplier
 
     // Track consecutive high-asymmetry reps for alert (ASYM-05)
     var consecutiveHighAsymmetryCount by remember { mutableStateOf(0) }
@@ -129,6 +140,7 @@ fun WorkoutHud(
                 // should only be allowed when the machine is not engaged. Official app behavior.
                 showNextButton = false,
                 isCurrentExerciseBodyweight = isCurrentExerciseBodyweight,
+                cableCount = currentExerciseCableCount,
             )
         },
         containerColor = MaterialTheme.colorScheme.surface,
@@ -165,6 +177,11 @@ fun WorkoutHud(
                             totalSets = totalSets,
                             timedExerciseRemainingSeconds = timedExerciseRemainingSeconds,
                             isCurrentExerciseBodyweight = isCurrentExerciseBodyweight,
+                            cableCount = currentExerciseCableCount,
+                            isExerciseTimerPaused = isExerciseTimerPaused,
+                            onPauseExerciseTimer = onPauseExerciseTimer,
+                            onResumeExerciseTimer = onResumeExerciseTimer,
+                            onResetExerciseTimer = onResetExerciseTimer,
                         )
                     }
 
@@ -181,6 +198,7 @@ fun WorkoutHud(
                         formatWeight = formatWeight,
                         isCurrentExerciseBodyweight = isCurrentExerciseBodyweight,
                         latestBiomechanicsResult = latestBiomechanicsResult,
+                        velocityLossThresholdPercent = velocityLossThresholdPercent,
                     )
                 }
             }
@@ -372,6 +390,7 @@ private fun HudBottomBar(
     onNextExercise: () -> Unit,
     showNextButton: Boolean,
     isCurrentExerciseBodyweight: Boolean,
+    cableCount: Int? = null,
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
@@ -387,6 +406,7 @@ private fun HudBottomBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // Weight Controls - Echo mode shows "Adaptive" since weight is dynamic
+            // Issue #5: Show total weight (per-cable * cableCount) via WeightDisplayFormatter
             Column {
                 if (isCurrentExerciseBodyweight) {
                     Text(
@@ -401,12 +421,21 @@ private fun HudBottomBar(
                     )
                 } else {
                     Text(
-                        "Weight / Cable",
+                        "Weight",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text(
-                        if (workoutParameters.isEchoMode) "Adaptive" else formatWeight(workoutParameters.weightPerCableKg, weightUnit),
+                        if (workoutParameters.isEchoMode) {
+                            "Adaptive"
+                        } else {
+                            val unitSuffix = if (weightUnit == WeightUnit.LB) " lbs" else " kg"
+                            WeightDisplayFormatter.formatDisplayWeight(
+                                workoutParameters.weightPerCableKg,
+                                cableCount,
+                                weightUnit,
+                            ) + unitSuffix
+                        },
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                     )
@@ -443,6 +472,11 @@ private fun ExecutionPage(
     totalSets: Int = 0, // Total number of sets for current exercise
     timedExerciseRemainingSeconds: Int? = null, // Issue #192: Countdown for timed exercises
     isCurrentExerciseBodyweight: Boolean = false,
+    cableCount: Int? = null,
+    isExerciseTimerPaused: Boolean = false,
+    onPauseExerciseTimer: () -> Unit = {},
+    onResumeExerciseTimer: () -> Unit = {},
+    onResetExerciseTimer: () -> Unit = {},
 ) {
     // Issue #192: Check if this is a timed exercise
     val isTimedExercise = timedExerciseRemainingSeconds != null
@@ -501,6 +535,17 @@ private fun ExecutionPage(
                     MaterialTheme.colorScheme.primary
                 },
             )
+
+            // Issue #190: Timer control buttons for bodyweight timed exercises
+            if (timedExerciseRemainingSeconds != null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                ExerciseTimerControls(
+                    isPaused = isExerciseTimerPaused,
+                    onPause = onPauseExerciseTimer,
+                    onResume = onResumeExerciseTimer,
+                    onReset = onResetExerciseTimer,
+                )
+            }
         } else if (isTimedExercise && timedExerciseRemainingSeconds != null) {
             // timedExerciseRemainingSeconds != null is logically redundant (implied by isTimedExercise)
             // but required for Kotlin smart-cast so timedExerciseRemainingSeconds can be used as non-null below
@@ -522,6 +567,15 @@ private fun ExecutionPage(
                 } else {
                     MaterialTheme.colorScheme.primary
                 },
+            )
+
+            // Issue #190: Timer control buttons for timed cable exercises
+            Spacer(modifier = Modifier.height(12.dp))
+            ExerciseTimerControls(
+                isPaused = isExerciseTimerPaused,
+                onPause = onPauseExerciseTimer,
+                onResume = onResumeExerciseTimer,
+                onReset = onResetExerciseTimer,
             )
 
             // Timed cable exercises still count reps; show a secondary rep counter.
@@ -625,10 +679,12 @@ private fun ExecutionPage(
 
             // For Echo mode: show "—" when force data isn't available yet (Issue #52)
             // This prevents showing "0 kg" during initial reps before heuristic data populates
+            // Issue #5: Show total weight (per-cable * cableCount) via WeightDisplayFormatter
             val forceLabel = if (isEchoMode && perCableKg <= 0f) {
                 "—"
             } else {
-                formatWeight(perCableKg, weightUnit)
+                val unitSuffix = if (weightUnit == WeightUnit.LB) " lbs" else " kg"
+                WeightDisplayFormatter.formatDisplayWeight(perCableKg, cableCount, weightUnit) + unitSuffix
             }
 
             val hudSize = ResponsiveDimensions.componentSize(baseSize = 200.dp)
@@ -637,7 +693,7 @@ private fun ExecutionPage(
                 maxForce = gaugeMax,
                 velocity = (metric.velocityA + metric.velocityB) / 2.0,
                 label = forceLabel,
-                subLabel = "PER CABLE",
+                subLabel = "TOTAL",
                 modifier = Modifier.size(hudSize),
             )
         } else if (isCurrentExerciseBodyweight) {
@@ -775,6 +831,7 @@ private fun StatsPage(
     formatWeight: (Float, WeightUnit) -> String,
     isCurrentExerciseBodyweight: Boolean = false,
     latestBiomechanicsResult: BiomechanicsRepResult? = null,
+    velocityLossThresholdPercent: Int = 20,
 ) {
     if (isCurrentExerciseBodyweight) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -881,17 +938,17 @@ private fun StatsPage(
                     // Velocity loss (only shown after rep 2)
                     val vloss = latestBiomechanicsResult.velocity.velocityLossPercent
                     if (vloss != null) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
-                        ) {
-                            StatColumn(
-                                label = "Vel. Loss",
-                                value = "${vloss.toInt()}%",
-                                color = if (vloss > 20f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            val repsRemaining = latestBiomechanicsResult.velocity.estimatedRepsRemaining
-                            if (repsRemaining != null) {
+                        VelocityLossIndicator(
+                            currentLossPercent = vloss,
+                            thresholdPercent = velocityLossThresholdPercent,
+                            shouldStopSet = latestBiomechanicsResult.velocity.shouldStopSet,
+                        )
+                        val repsRemaining = latestBiomechanicsResult.velocity.estimatedRepsRemaining
+                        if (repsRemaining != null) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.Center,
+                            ) {
                                 StatColumn(
                                     label = "Est. Reps Left",
                                     value = "$repsRemaining",
@@ -1039,6 +1096,84 @@ private fun StatsPage(
     }
 }
 
+@Composable
+private fun VelocityLossIndicator(
+    currentLossPercent: Float,
+    thresholdPercent: Int,
+    shouldStopSet: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val maxDisplayPercent = (thresholdPercent * 1.5f).coerceAtMost(100f)
+    val fillFraction = (currentLossPercent / maxDisplayPercent).coerceIn(0f, 1f)
+    val thresholdFraction = (thresholdPercent.toFloat() / maxDisplayPercent).coerceIn(0f, 1f)
+
+    val ratio = currentLossPercent / thresholdPercent
+    val barColor = when {
+        ratio < 0.5f -> Color(0xFF10B981)
+        ratio < 0.8f -> Color(0xFFF59E0B)
+        else -> Color(0xFFDC2626)
+    }
+
+    Column(modifier = modifier) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                "Velocity Loss",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "${currentLossPercent.roundToInt()}% / ${thresholdPercent}%",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = if (shouldStopSet) FontWeight.Bold else FontWeight.Normal,
+                color = if (shouldStopSet) Color(0xFFDC2626) else MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(8.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+        ) {
+            // Fill bar
+            Box(
+                Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(fillFraction)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(barColor),
+            )
+            // Threshold marker line: fill to threshold fraction, align line at trailing edge
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(thresholdFraction),
+                contentAlignment = Alignment.CenterEnd,
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxHeight()
+                        .width(2.dp)
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)),
+                )
+            }
+        }
+        if (shouldStopSet) {
+            Text(
+                "THRESHOLD REACHED",
+                style = MaterialTheme.typography.labelSmall,
+                color = Color(0xFFDC2626),
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+    }
+}
+
 /**
  * Formats velocity from mm/s to m/s with 2 decimal places.
  * Uses integer arithmetic for KMP cross-platform safety (no String.format in commonMain).
@@ -1067,5 +1202,65 @@ private fun StatColumn(label: String, value: String, color: Color) {
             fontWeight = FontWeight.Bold,
             color = color,
         )
+    }
+}
+
+/**
+ * Issue #190: Pause/Resume/Reset controls for timed exercise countdown.
+ * Styled to match RestTimerCard button pattern. Pure UI — no BLE side effects.
+ */
+@Composable
+private fun ExerciseTimerControls(
+    isPaused: Boolean,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+    onReset: () -> Unit,
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Pause/Resume toggle
+        FilledTonalButton(
+            onClick = if (isPaused) onResume else onPause,
+            shape = RoundedCornerShape(16.dp),
+            colors = if (isPaused) {
+                ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                )
+            } else {
+                ButtonDefaults.filledTonalButtonColors()
+            },
+        ) {
+            Icon(
+                if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                contentDescription = if (isPaused) "Resume Timer" else "Pause Timer",
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                if (isPaused) "Resume" else "Pause",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+
+        // Reset button
+        OutlinedButton(
+            onClick = onReset,
+            shape = RoundedCornerShape(16.dp),
+        ) {
+            Icon(
+                Icons.Default.Replay,
+                contentDescription = "Reset Timer",
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                "Reset",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+            )
+        }
     }
 }

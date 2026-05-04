@@ -28,7 +28,12 @@ enum class WorkoutPhase {
 }
 
 /**
- * Personal record for an exercise
+ * Personal record for an exercise.
+ *
+ * [cableCount] enables cable-aware weight display for PRs. Populated from
+ * exercise `preferredCableCount` when a PR is recorded. Legacy PRs have
+ * `cableCount = null`, which causes WeightDisplayFormatter to default to 1
+ * (showing per-cable weight — safe backward-compatible behavior).
  */
 data class PersonalRecord(
     val id: Long = 0,
@@ -43,6 +48,7 @@ data class PersonalRecord(
     val volume: Float,
     val phase: WorkoutPhase = WorkoutPhase.COMBINED,
     val profileId: String = "default",
+    val cableCount: Int? = null,
 )
 
 /**
@@ -76,6 +82,7 @@ sealed class WorkoutState {
         val durationMs: Long = 0L,
         val totalVolumeKg: Float = 0f,
         val cableCount: Int = 1,
+        val displayMultiplier: Int = 1,
         val heaviestLiftKgPerCable: Float = 0f,
         val configuredWeightKgPerCable: Float = 0f,
         val peakForceConcentricA: Float = 0f, // Peak during lifting (velocity > 0)
@@ -397,8 +404,11 @@ data class RepEvent(
  * Implemented as a sealed class to support parameterized variants (REP_COUNT_ANNOUNCED).
  */
 sealed class HapticEvent {
-    /** Light haptic + beep sound */
+    /** Light haptic + chirpchirp sound (more audible than original beep) */
     data object REP_COMPLETED : HapticEvent()
+
+    /** Issue #100: Distinct sound on final working rep of a set — strong haptic + boopbeepbeep */
+    data object FINAL_REP : HapticEvent()
 
     /** Audio rep count announcement (1-25) - no haptic, just spoken number */
     data class REP_COUNT_ANNOUNCED(val repNumber: Int) : HapticEvent() {
@@ -433,6 +443,9 @@ sealed class HapticEvent {
 
     /** Strong haptic + random PR celebration sound */
     data object PERSONAL_RECORD : HapticEvent()
+
+    /** Issue #313: Velocity loss threshold reached — strong haptic + alert sound */
+    data object VELOCITY_THRESHOLD_REACHED : HapticEvent()
 
     /** Issue #100: Distinct transition sound from warmup to working sets */
     data object WARMUP_TO_WORKING : HapticEvent()
@@ -490,6 +503,7 @@ data class WorkoutSession(
     val heaviestLiftKg: Float? = null,
     val totalVolumeKg: Float? = null,
     val cableCount: Int? = null,
+    val displayMultiplier: Int? = null,
     val estimatedCalories: Float? = null,
     val warmupAvgWeightKg: Float? = null,
     val workingAvgWeightKg: Float? = null,
@@ -550,6 +564,7 @@ fun WorkoutSession.toSetSummary(): WorkoutState.SetSummary? {
         durationMs = duration,
         totalVolumeKg = effectiveTotalVolumeKg(),
         cableCount = cableCount ?: 1,
+        displayMultiplier = displayMultiplier ?: cableCount ?: 1,
         heaviestLiftKgPerCable = effectiveHeaviestKgPerCable(),
         configuredWeightKgPerCable = weightPerCableKg,
         peakForceConcentricA = peakForceConcentricA ?: 0f,
@@ -611,6 +626,7 @@ data class PRCelebrationEvent(
     val reps: Int,
     val workoutMode: String,
     val brokenPRTypes: List<PRType> = listOf(PRType.MAX_WEIGHT),
+    val cableCount: Int? = null,
 ) {
     val isWeightPR: Boolean get() = PRType.MAX_WEIGHT in brokenPRTypes
     val isVolumePR: Boolean get() = PRType.MAX_VOLUME in brokenPRTypes

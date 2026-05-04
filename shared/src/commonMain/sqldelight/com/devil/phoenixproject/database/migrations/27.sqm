@@ -1,3 +1,21 @@
--- Migration 27: Add deletedAt column to TrainingCycle for soft-delete sync support.
--- Mirrors Routine's deletedAt pattern (added in migration 11).
+-- Migration 27: Routine Groups + TrainingCycle soft-delete
+--
+-- Adds a RoutineGroup table for named routine grouping and a nullable
+-- groupId FK on the Routine table. ON DELETE SET NULL ensures deleting
+-- a group preserves routines (they become ungrouped).
+-- Also adds deletedAt to TrainingCycle for soft-delete sync support
+-- (mirrors Routine's deletedAt pattern from migration 11).
+
+CREATE TABLE IF NOT EXISTS RoutineGroup (
+    id TEXT PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL,
+    orderIndex INTEGER NOT NULL DEFAULT 0,
+    createdAt INTEGER NOT NULL,
+    profile_id TEXT NOT NULL DEFAULT 'default'
+);
+
+CREATE INDEX IF NOT EXISTS idx_routine_group_profile ON RoutineGroup(profile_id);
+
+ALTER TABLE Routine ADD COLUMN groupId TEXT REFERENCES RoutineGroup(id) ON DELETE SET NULL;
+
 ALTER TABLE TrainingCycle ADD COLUMN deletedAt INTEGER;

@@ -39,9 +39,10 @@ import com.devil.phoenixproject.domain.model.currentTimeMillis
 import com.devil.phoenixproject.domain.model.elapsedRealtimeMillis
 import com.devil.phoenixproject.domain.model.generateUUID
 import com.devil.phoenixproject.domain.replay.RepBoundaryDetector
+import com.devil.phoenixproject.util.BleConstants
+import com.devil.phoenixproject.domain.usecase.BodyweightVolumeCalculator
 import com.devil.phoenixproject.domain.usecase.RepCounterFromMachine
 import com.devil.phoenixproject.getPlatform
-import com.devil.phoenixproject.util.BleConstants
 import com.devil.phoenixproject.util.BlePacketFactory
 import com.devil.phoenixproject.util.Constants
 import com.devil.phoenixproject.util.DataBackupManager
@@ -56,6 +57,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.coroutines.coroutineContext
+import kotlin.math.roundToInt
 
 /**
  * Handles all workout lifecycle logic: start/stop, rep processing, auto-stop,
@@ -189,6 +192,10 @@ class ActiveSessionEngine(
     private val motionStartDetector = MotionStartDetector()
     private var motionStartListenerJob: Job? = null
 
+    // VBT auto-end state (Issue #313)
+    private var velocityThresholdAlertEmitted = false
+    private var consecutiveThresholdReps = 0
+
     // ===== Init Block: Workout-Related Collectors (moved from DWSM) =====
 
     init {
@@ -199,15 +206,21 @@ class ActiveSessionEngine(
         repCounter.onRepEvent = { event ->
             scope.launch {
                 val timing = coordinator._workoutParameters.value.repCountTiming
+                val params = coordinator._workoutParameters.value
                 when (event.type) {
                     RepType.WORKING_PENDING -> {
                         // TOP timing: announce rep number at concentric peak
                         if (timing == RepCountTiming.TOP) {
                             val repNumber = event.workingCount + 1 // PENDING has pre-increment count
                             val prefs = settingsManager.userPreferences.value
+                            // Issue #100: Check if this is the final working rep
+                            val isFinalRep = !params.isJustLift && !params.isAMRAP &&
+                                params.reps > 0 && repNumber >= params.reps
                             if (prefs.audioRepCountEnabled && repNumber in 1..25) {
                                 coordinator._hapticEvents.emit(HapticEvent.REP_COUNT_ANNOUNCED(repNumber))
-                            } else {
+                            } else if (prefs.repSoundEnabled && isFinalRep) {
+                                coordinator._hapticEvents.emit(HapticEvent.FINAL_REP)
+                            } else if (prefs.repSoundEnabled) {
                                 coordinator._hapticEvents.emit(HapticEvent.REP_COMPLETED)
                             }
                         }
@@ -218,16 +231,27 @@ class ActiveSessionEngine(
                         // BOTTOM timing: announce at eccentric valley (traditional)
                         if (timing == RepCountTiming.BOTTOM) {
                             val prefs = settingsManager.userPreferences.value
+                            // Issue #100: Check if this is the final working rep
+                            val isFinalRep = !params.isJustLift && !params.isAMRAP &&
+                                params.reps > 0 && event.workingCount >= params.reps
                             if (prefs.audioRepCountEnabled && event.workingCount in 1..25) {
                                 coordinator._hapticEvents.emit(HapticEvent.REP_COUNT_ANNOUNCED(event.workingCount))
-                            } else {
+                            } else if (prefs.repSoundEnabled && isFinalRep) {
+                                coordinator._hapticEvents.emit(HapticEvent.FINAL_REP)
+                            } else if (prefs.repSoundEnabled) {
                                 coordinator._hapticEvents.emit(HapticEvent.REP_COMPLETED)
                             }
                         }
                         // TOP timing: already announced on PENDING, no double-announce
                     }
 
-                    RepType.WARMUP_COMPLETED -> coordinator._hapticEvents.emit(HapticEvent.REP_COMPLETED)
+                    RepType.WARMUP_COMPLETED -> {
+                        // Issue #100: Gate warmup rep sound by repSoundEnabled preference
+                        val prefs = settingsManager.userPreferences.value
+                        if (prefs.repSoundEnabled) {
+                            coordinator._hapticEvents.emit(HapticEvent.REP_COMPLETED)
+                        }
+                    }
 
                     RepType.WARMUP_COMPLETE -> {
                         coordinator._hapticEvents.emit(HapticEvent.WARMUP_COMPLETE)
@@ -417,6 +441,7 @@ class ActiveSessionEngine(
         workingRepsCount: Int = 0,
         warmupCompleteTimeMs: Long = 0L,
         cableCountHint: Int? = null,
+        displayMultiplierHint: Int? = null,
     ): WorkoutState.SetSummary {
         if (metrics.isEmpty()) {
             return WorkoutState.SetSummary(
@@ -425,6 +450,7 @@ class ActiveSessionEngine(
                 avgLoadKgPerCable = 0f,
                 repCount = repCount,
                 cableCount = cableCountHint ?: 1,
+                displayMultiplier = displayMultiplierHint ?: 1,
                 heaviestLiftKgPerCable = fallbackWeightKg,
                 configuredWeightKgPerCable = configuredWeightKgPerCable,
             )
@@ -615,6 +641,7 @@ class ActiveSessionEngine(
             durationMs = durationMs,
             totalVolumeKg = totalVolumeKg,
             cableCount = cableCount,
+            displayMultiplier = displayMultiplierHint ?: cableCount,
             heaviestLiftKgPerCable = heaviestLiftKgPerCable,
             configuredWeightKgPerCable = configuredWeightKgPerCable,
             peakForceConcentricA = peakConcentricA,
@@ -634,6 +661,44 @@ class ActiveSessionEngine(
             workingAvgWeightKg = workingAvgWeightKg,
             burnoutAvgWeightKg = burnoutAvgWeightKg,
             peakWeightKg = peakWeightKg,
+        )
+    }
+
+    /**
+     * Apply bodyweight volume overrides to a set summary.
+     *
+     * For bodyweight exercises (no cable accessories), the cable-based volume calculation
+     * produces meaningless values. This replaces totalVolumeKg and heaviestLiftKgPerCable
+     * with estimates based on the user's body weight and the exercise-specific percentage
+     * from [BodyweightVolumeCalculator].
+     *
+     * @param summary The cable-based set summary to override
+     * @param currentExercise The routine exercise context (null-safe; returns summary unchanged)
+     * @param bodyWeightKg User's body weight in kg (0 = not set, returns summary unchanged)
+     * @return Summary with bodyweight volume applied, or the original summary if not applicable
+     */
+    internal fun applyBodyweightVolume(
+        summary: WorkoutState.SetSummary,
+        currentExercise: RoutineExercise?,
+        bodyWeightKg: Float,
+    ): WorkoutState.SetSummary {
+        if (currentExercise == null) return summary
+        if (currentExercise.exercise.hasCableAccessory) return summary
+        if (bodyWeightKg <= 0f) return summary
+
+        val exerciseName = currentExercise.exercise.name
+        val repCount = summary.repCount
+        val volume = BodyweightVolumeCalculator.calculateVolume(exerciseName, bodyWeightKg, repCount)
+        val effectiveWeight = BodyweightVolumeCalculator.effectiveWeight(exerciseName, bodyWeightKg)
+
+        Logger.d("ActiveSessionEngine") {
+            "applyBodyweightVolume: exercise=$exerciseName, bodyWeight=${bodyWeightKg}kg, " +
+                "reps=$repCount, volume=${volume}kg, effectiveWeight=${effectiveWeight}kg"
+        }
+
+        return summary.copy(
+            totalVolumeKg = volume,
+            heaviestLiftKgPerCable = effectiveWeight,
         )
     }
 
@@ -1018,6 +1083,33 @@ class ActiveSessionEngine(
             } catch (e: Exception) {
                 Logger.e(e) { "Biomechanics processing failed for rep $repNumber" }
             }
+
+            // Issue #313: Check velocity threshold for alert and auto-end (working reps only)
+            if (coordinator._repCount.value.isWarmupComplete) {
+                checkVelocityThreshold()
+            }
+        }
+    }
+
+    private suspend fun checkVelocityThreshold() {
+        val latestResult = coordinator.biomechanicsEngine.latestRepResult.value ?: return
+        val velocity = latestResult.velocity
+
+        if (velocity.shouldStopSet) {
+            consecutiveThresholdReps++
+
+            if (!velocityThresholdAlertEmitted) {
+                velocityThresholdAlertEmitted = true
+                coordinator._hapticEvents.emit(HapticEvent.VELOCITY_THRESHOLD_REACHED)
+                Logger.i { "VBT: Velocity loss threshold reached (${velocity.velocityLossPercent?.roundToInt()}%). Alert emitted." }
+            }
+
+            if (consecutiveThresholdReps >= 2 && coordinator.autoEndOnVelocityLoss) {
+                Logger.i { "VBT: Auto-ending set — $consecutiveThresholdReps consecutive reps above threshold" }
+                handleSetCompletion()
+            }
+        } else {
+            consecutiveThresholdReps = 0
         }
     }
 
@@ -1579,6 +1671,8 @@ class ActiveSessionEngine(
         coordinator.setRepMetrics.value = emptyList()
         // Reset biomechanics engine and rep boundary timestamps
         coordinator.biomechanicsEngine.reset()
+        velocityThresholdAlertEmitted = false
+        consecutiveThresholdReps = 0
         coordinator.repBoundaryTimestamps.value = emptyList()
         coordinator.warmupCompleteTimeMs = 0
         // Reset variable warm-up state
@@ -1913,6 +2007,8 @@ class ActiveSessionEngine(
         coordinator.setRepMetrics.value = emptyList()
         coordinator.repBoundaryTimestamps.value = emptyList()
         coordinator.biomechanicsEngine.reset()
+        velocityThresholdAlertEmitted = false
+        consecutiveThresholdReps = 0
         coordinator.repQualityScorer.reset()
         coordinator._latestRepQuality.value = null
         coordinator._loadBaselineA.value = 0f
@@ -2011,11 +2107,21 @@ class ActiveSessionEngine(
                     coordinator._hapticEvents.emit(HapticEvent.WORKOUT_START)
 
                     coordinator.bodyweightTimerJob?.cancel()
+                    coordinator.exerciseTimerOriginalDuration = effectiveDuration
+                    coordinator._isExerciseTimerPaused.value = false
                     coordinator.bodyweightTimerJob = scope.launch {
                         coordinator._timedExerciseRemainingSeconds.value = effectiveDuration
-                        for (remaining in effectiveDuration downTo 1) {
-                            coordinator._timedExerciseRemainingSeconds.value = remaining
+                        while ((coordinator._timedExerciseRemainingSeconds.value ?: 0) > 0) {
+                            if (coordinator._isExerciseTimerPaused.value) {
+                                delay(100L)
+                                continue
+                            }
                             delay(1000L)
+                            // Re-check pause after delay — if paused during the 1s wait, don't decrement
+                            if (!coordinator._isExerciseTimerPaused.value) {
+                                val current = coordinator._timedExerciseRemainingSeconds.value ?: 0
+                                coordinator._timedExerciseRemainingSeconds.value = (current - 1).coerceAtLeast(0)
+                            }
                         }
                         coordinator._timedExerciseRemainingSeconds.value = 0
                         handleSetCompletion()
@@ -2191,6 +2297,8 @@ class ActiveSessionEngine(
                 @Suppress("SENSELESS_COMPARISON")
                 if (isTimedCableExercise && exerciseDuration != null) {
                     coordinator.bodyweightTimerJob?.cancel()
+                    coordinator.exerciseTimerOriginalDuration = exerciseDuration
+                    coordinator._isExerciseTimerPaused.value = false
                     coordinator.bodyweightTimerJob = scope.launch {
                         if (effectiveParams.warmupReps > 0) {
                             Logger.d { "Duration cable: waiting for ${effectiveParams.warmupReps} warmup reps before starting ${exerciseDuration}s timer" }
@@ -2199,9 +2307,16 @@ class ActiveSessionEngine(
                         }
 
                         coordinator._timedExerciseRemainingSeconds.value = exerciseDuration
-                        for (remaining in exerciseDuration downTo 1) {
-                            coordinator._timedExerciseRemainingSeconds.value = remaining
+                        while ((coordinator._timedExerciseRemainingSeconds.value ?: 0) > 0) {
+                            if (coordinator._isExerciseTimerPaused.value) {
+                                delay(100L)
+                                continue
+                            }
                             delay(1000L)
+                            if (!coordinator._isExerciseTimerPaused.value) {
+                                val current = coordinator._timedExerciseRemainingSeconds.value ?: 0
+                                coordinator._timedExerciseRemainingSeconds.value = (current - 1).coerceAtLeast(0)
+                            }
                         }
                         coordinator._timedExerciseRemainingSeconds.value = 0
                         handleSetCompletion()
@@ -2383,7 +2498,12 @@ class ActiveSessionEngine(
                 workingRepsCount = repCount.workingReps,
                 warmupCompleteTimeMs = coordinator.warmupCompleteTimeMs,
                 cableCountHint = selectedExercise?.preferredCableCount,
-            )
+                displayMultiplierHint = selectedExercise?.displayMultiplier,
+            ).let { baseSummary ->
+                // Issue #229: Override volume for bodyweight exercises
+                val bodyWeightKg = settingsManager.userPreferences.value.bodyWeightKg
+                applyBodyweightVolume(baseSummary, currentExercise, bodyWeightKg)
+            }
 
             // Issue #252: Exclude warmup time from session duration
             val effectiveStart = if (coordinator.warmupCompleteTimeMs > 0L) coordinator.warmupCompleteTimeMs else coordinator.workoutStartTime
@@ -2413,6 +2533,7 @@ class ActiveSessionEngine(
                 heaviestLiftKg = summary.heaviestLiftKgPerCable,
                 totalVolumeKg = summary.totalVolumeKg,
                 cableCount = summary.cableCount,
+                displayMultiplier = summary.displayMultiplier,
                 estimatedCalories = summary.estimatedCalories,
                 warmupAvgWeightKg = if (params.isEchoMode) summary.warmupAvgWeightKg else null,
                 workingAvgWeightKg = if (params.isEchoMode) summary.workingAvgWeightKg else null,
@@ -2745,6 +2866,8 @@ class ActiveSessionEngine(
         val selectedExercise = resolveSelectedExercise(params)
         val exerciseName = selectedExercise?.name
 
+        val currentExercise = coordinator._loadedRoutine.value?.exercises?.getOrNull(coordinator._currentExerciseIndex.value)
+
         val summary = calculateSetSummaryMetrics(
             metrics = metricsSnapshot,
             repCount = working,
@@ -2755,7 +2878,12 @@ class ActiveSessionEngine(
             workingRepsCount = working,
             warmupCompleteTimeMs = coordinator.warmupCompleteTimeMs,
             cableCountHint = selectedExercise?.preferredCableCount,
-        )
+            displayMultiplierHint = selectedExercise?.displayMultiplier,
+        ).let { baseSummary ->
+            // Issue #229: Override volume for bodyweight exercises
+            val bodyWeightKg = settingsManager.userPreferences.value.bodyWeightKg
+            applyBodyweightVolume(baseSummary, currentExercise, bodyWeightKg)
+        }
 
         // Capture biomechanics summary for WorkoutSession fields.
         // Safe to call here: runs BEFORE biomechanicsEngine.reset() in handleSetCompletion.
@@ -2791,6 +2919,7 @@ class ActiveSessionEngine(
             heaviestLiftKg = summary.heaviestLiftKgPerCable,
             totalVolumeKg = summary.totalVolumeKg,
             cableCount = summary.cableCount,
+            displayMultiplier = summary.displayMultiplier,
             estimatedCalories = summary.estimatedCalories,
             warmupAvgWeightKg = if (params.isEchoMode) summary.warmupAvgWeightKg else null,
             workingAvgWeightKg = if (params.isEchoMode) summary.workingAvgWeightKg else null,
@@ -2940,6 +3069,7 @@ class ActiveSessionEngine(
         coordinator.bodyweightTimerJob?.cancel()
         coordinator.bodyweightTimerJob = null
         coordinator._timedExerciseRemainingSeconds.value = null
+        coordinator._isExerciseTimerPaused.value = false
 
         scope.launch {
             val params = coordinator._workoutParameters.value
@@ -3072,6 +3202,8 @@ class ActiveSessionEngine(
 
             // Reset biomechanics engine and rep boundary timestamps for next set
             coordinator.biomechanicsEngine.reset()
+            velocityThresholdAlertEmitted = false
+            consecutiveThresholdReps = 0
             coordinator.repBoundaryTimestamps.value = emptyList()
 
             val completedReps = coordinator._repCount.value.workingReps
@@ -3088,7 +3220,12 @@ class ActiveSessionEngine(
                 warmupRepsCount = warmupReps,
                 workingRepsCount = completedReps,
                 cableCountHint = selectedExercise?.preferredCableCount,
-            )
+                displayMultiplierHint = selectedExercise?.displayMultiplier,
+            ).let { raw ->
+                // Issue #229: Override volume for bodyweight exercises
+                val bodyWeightKg = settingsManager.userPreferences.value.bodyWeightKg
+                applyBodyweightVolume(raw, currentExercise, bodyWeightKg)
+            }
 
             // Attach quality and biomechanics summaries to the set summary
             val summary = baseSummary.copy(
@@ -3770,6 +3907,40 @@ class ActiveSessionEngine(
         coordinator._restSecondsRemaining.value = coordinator._restOriginalDuration.value
         armRestDeadline(coordinator._restOriginalDuration.value)
         Logger.d("ActiveSessionEngine") { "resetRestTimer: reset to ${coordinator._restOriginalDuration.value}s" }
+    }
+
+    // ===== Exercise Timer Controls (Issue #190: Pause/Resume/Reset for timed exercises) =====
+
+    /**
+     * Pause the exercise timer. Pure state manipulation — no BLE commands.
+     * The bodyweightTimerJob loop checks this flag and suspends decrement when true.
+     */
+    fun pauseExerciseTimer() {
+        if (coordinator._timedExerciseRemainingSeconds.value == null) return
+        coordinator._isExerciseTimerPaused.value = true
+        Logger.d("ActiveSessionEngine") { "pauseExerciseTimer: paused" }
+    }
+
+    /**
+     * Resume the exercise timer from the current position. Pure state manipulation — no BLE commands.
+     */
+    fun resumeExerciseTimer() {
+        if (coordinator._timedExerciseRemainingSeconds.value == null) return
+        coordinator._isExerciseTimerPaused.value = false
+        Logger.d("ActiveSessionEngine") { "resumeExerciseTimer: resumed" }
+    }
+
+    /**
+     * Reset the exercise timer to its original duration and unpause. Pure state manipulation — no BLE commands.
+     * Does NOT cancel the bodyweightTimerJob; the loop will pick up the new remaining value.
+     */
+    fun resetExerciseTimer() {
+        if (coordinator._timedExerciseRemainingSeconds.value == null) return
+        val original = coordinator.exerciseTimerOriginalDuration
+        if (original <= 0) return
+        coordinator._isExerciseTimerPaused.value = false
+        coordinator._timedExerciseRemainingSeconds.value = original
+        Logger.d("ActiveSessionEngine") { "resetExerciseTimer: reset to ${original}s" }
     }
 
     fun startNextSet() {

@@ -44,7 +44,10 @@ fun HapticFeedbackEffect(hapticEvents: SharedFlow<HapticEvent>) {
     val soundIds = remember(soundPool) {
         mutableMapOf<HapticEvent, Int>().apply {
             try {
-                put(HapticEvent.REP_COMPLETED, soundPool.load(context, R.raw.beep, 1))
+                // Issue #100: chirpchirp is louder/more audible than beep for rep completion
+                put(HapticEvent.REP_COMPLETED, soundPool.load(context, R.raw.chirpchirp, 1))
+                // Issue #100: Distinct boopbeepbeep sound on final working rep
+                put(HapticEvent.FINAL_REP, soundPool.load(context, R.raw.boopbeepbeep, 1))
                 put(HapticEvent.WARMUP_COMPLETE, soundPool.load(context, R.raw.beepboop, 1))
                 put(HapticEvent.WORKOUT_COMPLETE, soundPool.load(context, R.raw.boopbeepbeep, 1))
                 put(HapticEvent.WORKOUT_START, soundPool.load(context, R.raw.chirpchirp, 1))
@@ -53,6 +56,7 @@ fun HapticFeedbackEffect(hapticEvents: SharedFlow<HapticEvent>) {
                 put(HapticEvent.DISCO_MODE_UNLOCKED, soundPool.load(context, R.raw.discomode, 1))
                 // Issue #100: Warmup-to-working transition (ascending tone)
                 put(HapticEvent.WARMUP_TO_WORKING, soundPool.load(context, R.raw.beepboop, 1))
+                put(HapticEvent.VELOCITY_THRESHOLD_REACHED, soundPool.load(context, R.raw.boopbeepbeep, 1))
                 // BADGE_EARNED, PERSONAL_RECORD use random sounds from lists below
                 // REP_COUNT_ANNOUNCED uses indexed sounds from repCountSoundIds list
                 // ERROR has no sound
@@ -200,6 +204,7 @@ private fun playHapticFeedback(event: HapticEvent, hapticFeedback: HapticFeedbac
 
         // Light click
 
+        is HapticEvent.FINAL_REP, // Issue #100: Strong vibration for final rep
         is HapticEvent.WARMUP_COMPLETE,
         is HapticEvent.WORKOUT_COMPLETE,
         is HapticEvent.REST_ENDING,
@@ -217,6 +222,8 @@ private fun playHapticFeedback(event: HapticEvent, hapticFeedback: HapticFeedbac
         is HapticEvent.WARMUP_TO_WORKING -> HapticFeedbackType.LongPress
 
         // Issue #100: Distinct transition feedback
+
+        is HapticEvent.VELOCITY_THRESHOLD_REACHED -> HapticFeedbackType.LongPress
 
         is HapticEvent.REP_COUNT_ANNOUNCED -> return // Already handled above
     }

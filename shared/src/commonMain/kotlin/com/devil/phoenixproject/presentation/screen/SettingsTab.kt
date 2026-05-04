@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.MilitaryTech
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Scale
 import androidx.compose.material.icons.filled.Share
@@ -50,6 +51,8 @@ import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -69,6 +72,8 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -97,14 +102,19 @@ import androidx.compose.ui.unit.dp
 import com.devil.phoenixproject.data.sync.SyncTriggerManager
 import com.devil.phoenixproject.domain.model.WeightUnit
 import com.devil.phoenixproject.presentation.components.CountdownDropdown
-import com.devil.phoenixproject.ui.theme.Spacing
+import com.devil.phoenixproject.ui.theme.*
+import com.devil.phoenixproject.util.BackupDestination
 import com.devil.phoenixproject.util.BackupProgress
 import com.devil.phoenixproject.util.ColorSchemes
+import com.devil.phoenixproject.util.Constants
 import com.devil.phoenixproject.util.DataBackupManager
 import com.devil.phoenixproject.util.DeviceInfo
 import com.devil.phoenixproject.util.ImportResult
 import com.devil.phoenixproject.util.KmpUtils
+import com.devil.phoenixproject.util.UnitConverter
+import com.devil.phoenixproject.util.rememberBackupLocationPicker
 import com.devil.phoenixproject.util.rememberFilePicker
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
@@ -188,6 +198,9 @@ fun SettingsTab(
     // Issue #237: Motion-triggered set start
     motionStartEnabled: Boolean = false,
     onMotionStartChange: (Boolean) -> Unit = {},
+    // Issue #190: Auto-start routine (skip overview)
+    autoStartRoutine: Boolean = false,
+    onAutoStartRoutineChange: (Boolean) -> Unit = {},
     summaryCountdownSeconds: Int = 10,
     autoStartCountdownSeconds: Int = 5,
     selectedColorSchemeIndex: Int = 0,
@@ -225,6 +238,9 @@ fun SettingsTab(
     onAutoBackupEnabledChange: (Boolean) -> Unit = {},
     backupStats: com.devil.phoenixproject.util.BackupStats? = null,
     onOpenBackupFolder: () -> Unit = {},
+    // Custom backup destination (Phase 42)
+    backupDestination: com.devil.phoenixproject.util.BackupDestination = com.devil.phoenixproject.util.BackupDestination.Default,
+    onBackupDestinationChange: (com.devil.phoenixproject.util.BackupDestination) -> Unit = {},
     // Issue #238: Language preference
     selectedLanguage: String = "en",
     onLanguageChange: (String) -> Unit = {},
@@ -235,6 +251,18 @@ fun SettingsTab(
     onSafeWordChange: (String?) -> Unit = {},
     safeWordCalibrated: Boolean = false,
     onSafeWordCalibratedChange: (Boolean) -> Unit = {},
+    // Issue #266: Configurable weight increment
+    weightIncrement: Float = -1f,
+    onWeightIncrementChange: (Float) -> Unit = {},
+    // Issue #229: Body weight for bodyweight exercise volume
+    bodyWeightKg: Float = 0f,
+    onBodyWeightKgChange: (Float) -> Unit = {},
+    // Issue #313: VBT power loss threshold
+    velocityLossThresholdPercent: Int = 20,
+    onVelocityLossThresholdChange: (Int) -> Unit = {},
+    autoEndOnVelocityLoss: Boolean = false,
+    onAutoEndOnVelocityLossChange: (Boolean) -> Unit = {},
+    stallDetectionEnabled: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val focusManager = LocalFocusManager.current
@@ -261,6 +289,23 @@ fun SettingsTab(
     var localSafeWord by remember(safeWord) { mutableStateOf(safeWord ?: "") }
     // Optimistic UI state for immediate visual feedback
     var localWeightUnit by remember(weightUnit) { mutableStateOf(weightUnit) }
+    // Issue #266: Weight increment picker dialog state
+    var showWeightIncrementDialog by remember { mutableStateOf(false) }
+    // Issue #229: Body weight input dialog state
+    var showBodyWeightDialog by remember { mutableStateOf(false) }
+    var bodyWeightInput by remember(bodyWeightKg) {
+        mutableStateOf(
+            if (bodyWeightKg > 0f) {
+                if (weightUnit == WeightUnit.KG) {
+                    UnitConverter.formatDecimal(bodyWeightKg)
+                } else {
+                    UnitConverter.formatDecimal(UnitConverter.kgToLb(bodyWeightKg))
+                }
+            } else {
+                ""
+            },
+        )
+    }
 
     // Inject DataBackupManager for manual backup/restore operations
     val backupManager: DataBackupManager = koinInject()
@@ -530,8 +575,11 @@ fun SettingsTab(
                     FilterChip(
                         selected = localWeightUnit == WeightUnit.KG,
                         onClick = {
+                            val changed = localWeightUnit != WeightUnit.KG
                             localWeightUnit = WeightUnit.KG
                             onWeightUnitChange(WeightUnit.KG)
+                            // Reset increment to default when unit changes (options differ per system)
+                            if (changed) onWeightIncrementChange(-1f)
                         },
                         label = { Text(stringResource(Res.string.label_kg)) },
                         modifier = Modifier.weight(1f),
@@ -551,8 +599,11 @@ fun SettingsTab(
                     FilterChip(
                         selected = localWeightUnit == WeightUnit.LB,
                         onClick = {
+                            val changed = localWeightUnit != WeightUnit.LB
                             localWeightUnit = WeightUnit.LB
                             onWeightUnitChange(WeightUnit.LB)
+                            // Reset increment to default when unit changes (options differ per system)
+                            if (changed) onWeightIncrementChange(-1f)
                         },
                         label = { Text(stringResource(Res.string.label_lbs)) },
                         modifier = Modifier.weight(1f),
@@ -568,6 +619,215 @@ fun SettingsTab(
                             borderColor = MaterialTheme.colorScheme.outline,
                             selectedBorderColor = MaterialTheme.colorScheme.primary,
                         ),
+                    )
+                }
+
+                // Issue #266: Weight Increment Picker
+                Spacer(modifier = Modifier.height(Spacing.small))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                Spacer(modifier = Modifier.height(Spacing.small))
+
+                val incrementOptions = if (localWeightUnit == WeightUnit.KG) {
+                    Constants.WEIGHT_INCREMENT_OPTIONS_KG
+                } else {
+                    Constants.WEIGHT_INCREMENT_OPTIONS_LB
+                }
+                val effectiveIncrement = if (weightIncrement > 0f) {
+                    weightIncrement
+                } else if (localWeightUnit == WeightUnit.KG) {
+                    Constants.DEFAULT_WEIGHT_INCREMENT_KG
+                } else {
+                    Constants.DEFAULT_WEIGHT_INCREMENT_LB
+                }
+                val unitLabel = if (localWeightUnit == WeightUnit.KG) "kg" else "lb"
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showWeightIncrementDialog = true }
+                        .padding(vertical = Spacing.small),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column {
+                        Text(
+                            text = "Weight Increment",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            text = "${UnitConverter.formatDecimal(effectiveIncrement)} $unitLabel per step",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.Default.ChevronRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                // Weight increment selection dialog
+                if (showWeightIncrementDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showWeightIncrementDialog = false },
+                        title = { Text("Weight Increment") },
+                        text = {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(Spacing.extraSmall),
+                            ) {
+                                Text(
+                                    text = "Choose how much weight changes with each +/- tap",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Spacer(modifier = Modifier.height(Spacing.small))
+                                incrementOptions.forEach { option ->
+                                    val isSelected = kotlin.math.abs(effectiveIncrement - option) < 0.001f
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                onWeightIncrementChange(option)
+                                                showWeightIncrementDialog = false
+                                            }
+                                            .padding(vertical = Spacing.small),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        RadioButton(
+                                            selected = isSelected,
+                                            onClick = {
+                                                onWeightIncrementChange(option)
+                                                showWeightIncrementDialog = false
+                                            },
+                                        )
+                                        Spacer(modifier = Modifier.width(Spacing.small))
+                                        Text(
+                                            text = "${UnitConverter.formatDecimal(option)} $unitLabel",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isSelected) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurface
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { showWeightIncrementDialog = false }) {
+                                Text("Cancel")
+                            }
+                        },
+                    )
+                }
+
+                // Issue #229: Body Weight Input
+                Spacer(modifier = Modifier.height(Spacing.small))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                Spacer(modifier = Modifier.height(Spacing.small))
+
+                val bodyWeightUnitLabel = if (localWeightUnit == WeightUnit.KG) "kg" else "lb"
+                val displayBodyWeight = if (bodyWeightKg > 0f) {
+                    if (localWeightUnit == WeightUnit.KG) {
+                        "${UnitConverter.formatDecimal(bodyWeightKg)} $bodyWeightUnitLabel"
+                    } else {
+                        "${UnitConverter.formatDecimal(UnitConverter.kgToLb(bodyWeightKg))} $bodyWeightUnitLabel"
+                    }
+                } else {
+                    "Not set"
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showBodyWeightDialog = true }
+                        .padding(vertical = Spacing.small),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column {
+                        Text(
+                            text = "Body Weight",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            text = "$displayBodyWeight — for bodyweight exercise volume",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.Default.ChevronRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                // Body weight input dialog
+                if (showBodyWeightDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showBodyWeightDialog = false },
+                        title = { Text("Body Weight") },
+                        text = {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(Spacing.small),
+                            ) {
+                                Text(
+                                    text = "Used to estimate volume for bodyweight exercises (push-ups, pull-ups, etc.)",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                OutlinedTextField(
+                                    value = bodyWeightInput,
+                                    onValueChange = { input ->
+                                        // Allow only valid numeric input
+                                        if (input.isEmpty() || input.matches(Regex("^\\d{0,3}(\\.\\d{0,1})?$"))) {
+                                            bodyWeightInput = input
+                                        }
+                                    },
+                                    label = { Text("Weight ($bodyWeightUnitLabel)") },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                val minDisplay = if (localWeightUnit == WeightUnit.KG) "20" else "44"
+                                val maxDisplay = if (localWeightUnit == WeightUnit.KG) "300" else "660"
+                                Text(
+                                    text = "Range: $minDisplay–$maxDisplay $bodyWeightUnitLabel",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    val parsed = bodyWeightInput.toFloatOrNull()
+                                    if (parsed != null) {
+                                        val inKg = if (localWeightUnit == WeightUnit.LB) {
+                                            UnitConverter.lbToKg(parsed)
+                                        } else {
+                                            parsed
+                                        }
+                                        // Clamp to valid range: 20-300 kg
+                                        val clamped = inKg.coerceIn(20f, 300f)
+                                        onBodyWeightKgChange(clamped)
+                                    }
+                                    showBodyWeightDialog = false
+                                },
+                            ) {
+                                Text("Save")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showBodyWeightDialog = false }) {
+                                Text("Cancel")
+                            }
+                        },
                     )
                 }
             }
@@ -870,6 +1130,34 @@ fun SettingsTab(
                         options = (2..10).toList(),
                         onValueSelected = { onAutoStartCountdownChange(it) },
                         modifier = Modifier.width(100.dp),
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(Spacing.medium))
+
+                // Issue #190: Auto-start routine toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Auto-start Routine",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            "Skip overview and start first exercise immediately",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = autoStartRoutine,
+                        onCheckedChange = onAutoStartRoutineChange,
                     )
                 }
 
@@ -1362,6 +1650,140 @@ fun SettingsTab(
             }
         }
 
+        // Issue #313: Velocity-Based Training Section
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .shadow(8.dp, RoundedCornerShape(20.dp)),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
+            shape = RoundedCornerShape(20.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+            border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(Spacing.medium),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .shadow(8.dp, RoundedCornerShape(20.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    colors = listOf(Color(0xFF10B981), Color(0xFF059669)),
+                                ),
+                                RoundedCornerShape(20.dp),
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Default.Speed,
+                            contentDescription = "Velocity-Based Training",
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(Spacing.medium))
+                    Text(
+                        "Velocity-Based Training",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                Spacer(modifier = Modifier.height(Spacing.small))
+
+                // Power Loss Threshold slider
+                Column {
+                    Text(
+                        "Power Loss Threshold",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "Velocity drop percentage that signals fatigue",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(modifier = Modifier.height(Spacing.small))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "10%",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Slider(
+                            value = velocityLossThresholdPercent.toFloat(),
+                            onValueChange = { onVelocityLossThresholdChange(it.roundToInt()) },
+                            valueRange = 10f..50f,
+                            steps = 7,
+                            modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                        )
+                        Text(
+                            "50%",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        "Current: ${velocityLossThresholdPercent}%",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                Text(
+                    "Changes take effect on next workout",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                Spacer(modifier = Modifier.height(Spacing.medium))
+
+                // Auto-end toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Auto-End on Velocity Loss",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Medium,
+                            color = if (stallDetectionEnabled) {
+                                MaterialTheme.colorScheme.onSurface
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            if (stallDetectionEnabled) {
+                                "Automatically end set when threshold is reached"
+                            } else {
+                                "Enable Stall Detection in Workout Settings to use auto-end"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = autoEndOnVelocityLoss,
+                        onCheckedChange = onAutoEndOnVelocityLossChange,
+                        enabled = stallDetectionEnabled,
+                    )
+                }
+            }
+        }
+
         // Data Management Section - Material 3 Expressive
         Card(
             modifier = Modifier
@@ -1430,6 +1852,101 @@ fun SettingsTab(
                         checked = autoBackupEnabled,
                         onCheckedChange = onAutoBackupEnabledChange,
                     )
+                }
+
+                // Backup Location selector (Phase 42)
+                var showLocationPicker by remember { mutableStateOf(false) }
+                Spacer(modifier = Modifier.height(Spacing.small))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            MaterialTheme.colorScheme.surfaceContainerLow,
+                            RoundedCornerShape(12.dp),
+                        )
+                        .padding(horizontal = Spacing.medium, vertical = Spacing.small),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Default.FolderOpen,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(modifier = Modifier.width(Spacing.small))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Backup Location",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            when (backupDestination) {
+                                is BackupDestination.Default -> "Default (Downloads/PhoenixBackups)"
+                                is BackupDestination.Custom -> backupDestination.displayName
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.small),
+                ) {
+                    OutlinedButton(
+                        onClick = { showLocationPicker = true },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+                    ) {
+                        Icon(
+                            Icons.Default.FolderOpen,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            "Change Location",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    if (backupDestination.isCustom) {
+                        OutlinedButton(
+                            onClick = { onBackupDestinationChange(BackupDestination.Default) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+                        ) {
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                "Reset to Default",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+
+                // Directory picker launcher
+                if (showLocationPicker) {
+                    val locationPicker = rememberBackupLocationPicker()
+                    locationPicker.LaunchDirectoryPicker { destination ->
+                        showLocationPicker = false
+                        destination?.let { onBackupDestinationChange(it) }
+                    }
                 }
 
                 // Backup stats: file count and total size

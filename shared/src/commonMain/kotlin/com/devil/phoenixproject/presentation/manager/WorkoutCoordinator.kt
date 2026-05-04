@@ -10,6 +10,7 @@ import com.devil.phoenixproject.domain.model.RepMetricData
 import com.devil.phoenixproject.domain.model.RepQualityScore
 import com.devil.phoenixproject.domain.model.Routine
 import com.devil.phoenixproject.domain.model.RoutineFlowState
+import com.devil.phoenixproject.domain.model.RoutineGroup
 import com.devil.phoenixproject.domain.model.WorkoutMetric
 import com.devil.phoenixproject.domain.model.WorkoutParameters
 import com.devil.phoenixproject.domain.model.WorkoutState
@@ -41,6 +42,8 @@ class WorkoutCoordinator(
         extraBufferCapacity = 10,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     ),
+    private val velocityLossThresholdPercent: Float = 20f,
+    autoEndOnVelocityLoss: Boolean = false,
 ) {
     companion object {
         /** Position-based auto-stop duration in seconds (handles in danger zone and released) */
@@ -216,6 +219,9 @@ class WorkoutCoordinator(
     internal val _routines = MutableStateFlow<List<Routine>>(emptyList())
     val routines: StateFlow<List<Routine>> = _routines.asStateFlow()
 
+    internal val _routineGroups = MutableStateFlow<List<RoutineGroup>>(emptyList())
+    val routineGroups: StateFlow<List<RoutineGroup>> = _routineGroups.asStateFlow()
+
     internal val _loadedRoutine = MutableStateFlow<Routine?>(null)
     val loadedRoutine: StateFlow<Routine?> = _loadedRoutine.asStateFlow()
 
@@ -306,6 +312,14 @@ class WorkoutCoordinator(
     @Volatile
     internal var isCurrentlyStalled = false
 
+    // ===== Exercise Timer Control State (Issue #190: Pause/Resume/Reset for timed exercises) =====
+
+    internal val _isExerciseTimerPaused = MutableStateFlow(false)
+    val isExerciseTimerPaused: StateFlow<Boolean> = _isExerciseTimerPaused.asStateFlow()
+
+    // Original duration for the current timed exercise (seconds), used for reset functionality
+    internal var exerciseTimerOriginalDuration: Int = 0
+
     // ===== Rest Timer Control State (Issue #297, #228) =====
 
     internal val _isRestPaused = MutableStateFlow(false)
@@ -379,12 +393,24 @@ class WorkoutCoordinator(
 
     // ===== Biomechanics Engine =====
 
+    private val _autoEndOnVelocityLoss = MutableStateFlow(autoEndOnVelocityLoss)
+    internal val autoEndOnVelocityLoss: Boolean
+        get() = _autoEndOnVelocityLoss.value
+
     /**
      * Biomechanics analysis engine for VBT, force curve, and asymmetry analysis.
      * Processes each rep's MetricSamples and exposes results via StateFlow.
      * Reset between sets via ActiveSessionEngine.
      */
-    val biomechanicsEngine = BiomechanicsEngine()
+    val biomechanicsEngine = BiomechanicsEngine(velocityLossThresholdPercent)
+
+    internal fun updateVbtSettings(
+        velocityLossThresholdPercent: Float,
+        autoEndOnVelocityLoss: Boolean,
+    ) {
+        biomechanicsEngine.updateVelocityLossThresholdPercent(velocityLossThresholdPercent)
+        _autoEndOnVelocityLoss.value = autoEndOnVelocityLoss
+    }
 
     /**
      * Rep boundary timestamps for MetricSample segmentation.

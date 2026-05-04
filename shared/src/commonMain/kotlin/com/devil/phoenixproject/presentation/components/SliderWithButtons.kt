@@ -45,6 +45,8 @@ fun SliderWithButtons(
     formatValue: (Float) -> String,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    deltaText: String? = null,
+    isDeltaPositive: Boolean = true,
 ) {
     // Calculate number of discrete steps for the slider
     // steps = number of intervals - 1 (excluding start and end)
@@ -103,6 +105,21 @@ fun SliderWithButtons(
                     maxLines = 1,
                 )
             }
+        }
+
+        // Delta from baseline indicator (e.g., "+11 lb" or "-5 kg")
+        if (deltaText != null) {
+            Text(
+                text = deltaText,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Medium,
+                color = if (isDeltaPositive) {
+                    MaterialTheme.colorScheme.tertiary
+                } else {
+                    MaterialTheme.colorScheme.error
+                },
+                modifier = Modifier.align(Alignment.End),
+            )
         }
 
         // Slider with +/- buttons

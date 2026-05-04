@@ -167,7 +167,14 @@ class DefaultWorkoutSessionManager(
     )
 
     // ===== Coordinator: Shared state bus for all workout state =====
-    val coordinator = WorkoutCoordinator(_hapticEvents)
+    val coordinator = run {
+        val prefs = preferencesManager.preferencesFlow.value
+        WorkoutCoordinator(
+            _hapticEvents = _hapticEvents,
+            velocityLossThresholdPercent = prefs.velocityLossThresholdPercent.toFloat(),
+            autoEndOnVelocityLoss = prefs.autoEndOnVelocityLoss,
+        )
+    }
 
     // ===== RoutineFlowManager: Handles routine CRUD, navigation, superset logic =====
     val routineFlowManager = RoutineFlowManager(
@@ -256,6 +263,19 @@ class DefaultWorkoutSessionManager(
             override fun calculateIsLastExercise(isSingleExercise: Boolean, currentExercise: RoutineExercise?, routine: Routine?): Boolean = routineFlowManager.calculateIsLastExercise(isSingleExercise, currentExercise, routine)
             override fun clearCycleContext() = routineFlowManager.clearCycleContext()
             override fun proceedFromSummary() = this@DefaultWorkoutSessionManager.proceedFromSummary()
+        }
+
+        scope.launch {
+            try {
+                preferencesManager.preferencesFlow.collect { prefs ->
+                    coordinator.updateVbtSettings(
+                        velocityLossThresholdPercent = prefs.velocityLossThresholdPercent.toFloat(),
+                        autoEndOnVelocityLoss = prefs.autoEndOnVelocityLoss,
+                    )
+                }
+            } catch (e: Exception) {
+                Logger.e(e) { "Error in VBT settings collector" }
+            }
         }
 
         // Manager-level summary auto-advance so countdown continues even when UI is backgrounded.
@@ -458,6 +478,13 @@ class DefaultWorkoutSessionManager(
     fun deleteRoutines(routineIds: Set<String>) = routineFlowManager.deleteRoutines(routineIds)
     fun moveRoutinesToProfile(routineIds: Set<String>, targetProfileId: String) = routineFlowManager.moveRoutinesToProfile(routineIds, targetProfileId)
     fun saveRoutineToProfile(routine: Routine, targetProfileId: String) = routineFlowManager.saveRoutineToProfile(routine, targetProfileId)
+
+    // Routine Group CRUD
+    fun createGroup(name: String) = routineFlowManager.createGroup(name)
+    fun renameGroup(groupId: String, newName: String) = routineFlowManager.renameGroup(groupId, newName)
+    fun deleteGroup(groupId: String) = routineFlowManager.deleteGroup(groupId)
+    fun moveRoutinesToGroup(routineIds: Set<String>, groupId: String?) = routineFlowManager.moveRoutinesToGroup(routineIds, groupId)
+
     fun loadRoutine(routine: Routine) = routineFlowManager.loadRoutine(routine)
 
     /** Issue #2 Fix: Suspend version that completes after routine is fully loaded */
@@ -557,6 +584,12 @@ class DefaultWorkoutSessionManager(
     fun toggleRestPause() = activeSessionEngine.toggleRestPause()
     fun resetRestTimer() = activeSessionEngine.resetRestTimer()
     fun startNextSet() = activeSessionEngine.startNextSet()
+
+    // ===== Exercise Timer Controls — delegated to ActiveSessionEngine =====
+
+    fun pauseExerciseTimer() = activeSessionEngine.pauseExerciseTimer()
+    fun resumeExerciseTimer() = activeSessionEngine.resumeExerciseTimer()
+    fun resetExerciseTimer() = activeSessionEngine.resetExerciseTimer()
 
     // ===== Orchestration: proceedFromSummary (cross-cutting, stays in DWSM) =====
 

@@ -13,6 +13,7 @@ import com.devil.phoenixproject.database.PlannedSet
 import com.devil.phoenixproject.database.ProgressionEvent
 import com.devil.phoenixproject.database.Routine
 import com.devil.phoenixproject.database.RoutineExercise
+import com.devil.phoenixproject.database.RoutineGroup
 import com.devil.phoenixproject.database.SessionNotes
 import com.devil.phoenixproject.database.StreakHistory
 import com.devil.phoenixproject.database.Superset
@@ -235,6 +236,8 @@ abstract class BaseDataBackupManager(
         // where the table does not yet exist (pre-flight create-if-missing covers this
         // on current builds, but defending against partial upgrade paths is cheap).
         val sessionNotes = runCatching { queries.selectAllSessionNotesSync().executeAsList() }.getOrElse { emptyList() }
+        // Migration 27 added RoutineGroup. Same defensive pattern.
+        val routineGroups = runCatching { queries.selectAllRoutineGroupsSync().executeAsList() }.getOrElse { emptyList() }
 
         val nowMs = KmpUtils.currentTimeMillis()
         BackupData(
@@ -261,6 +264,7 @@ abstract class BaseDataBackupManager(
                 gamificationStats = gamificationStats?.let { mapGamificationStatsToBackup(it) },
                 userProfiles = userProfiles.map { mapUserProfileToBackup(it) },
                 sessionNotes = sessionNotes.map { mapSessionNotesToBackup(it) },
+                routineGroups = routineGroups.map { mapRoutineGroupToBackup(it) },
             ),
         )
     }
@@ -337,6 +341,8 @@ abstract class BaseDataBackupManager(
             var gamificationStatsImported = false
             var sessionNotesImported = 0
             var sessionNotesSkipped = 0
+            var routineGroupsImported = 0
+            var routineGroupsSkipped = 0
 
             // Track adopted (profile_id updated) records
             var sessionsAdopted = 0
@@ -418,6 +424,7 @@ abstract class BaseDataBackupManager(
                                 heaviestLiftKg = session.heaviestLiftKg?.toDouble(),
                                 totalVolumeKg = session.totalVolumeKg?.toDouble(),
                                 cableCount = session.cableCount?.toLong(),
+                                display_multiplier = session.displayMultiplier?.toLong(),
                                 estimatedCalories = session.estimatedCalories?.toDouble(),
                                 warmupAvgWeightKg = session.warmupAvgWeightKg?.toDouble(),
                                 workingAvgWeightKg = session.workingAvgWeightKg?.toDouble(),
@@ -473,6 +480,20 @@ abstract class BaseDataBackupManager(
                     }
                 }
 
+                // Import routine groups (BEFORE routines — routines have FK to RoutineGroup)
+                backup.data.routineGroups.forEach { group ->
+                    val inserted = tryImport("routineGroup", group.id) {
+                        queries.insertRoutineGroupIgnore(
+                            id = group.id,
+                            name = group.name,
+                            orderIndex = group.orderIndex.toLong(),
+                            createdAt = group.createdAt,
+                            profile_id = group.profileId,
+                        )
+                    }
+                    if (inserted != null) routineGroupsImported++ else routineGroupsSkipped++
+                }
+
                 // Import routines
                 backup.data.routines.forEach { routine ->
                     if (routine.id !in existingRoutineIds) {
@@ -484,6 +505,7 @@ abstract class BaseDataBackupManager(
                             lastUsed = routine.lastUsed,
                             useCount = routine.useCount.toLong(),
                             profile_id = routine.profileId ?: "default",
+                            groupId = routine.groupId,
                         )
                         routinesImported++
                     } else {
@@ -593,6 +615,7 @@ abstract class BaseDataBackupManager(
                             volume = pr.volume.toDouble(),
                             phase = pr.phase ?: "COMBINED",
                             profile_id = pr.profileId ?: "default",
+                            cable_count = pr.cableCount?.toLong(),
                         )
                         personalRecordsImported++
                     } catch (e: Exception) {
@@ -857,6 +880,8 @@ abstract class BaseDataBackupManager(
                     userProfilesSkipped = userProfilesSkipped,
                     sessionNotesImported = sessionNotesImported,
                     sessionNotesSkipped = sessionNotesSkipped,
+                    routineGroupsImported = routineGroupsImported,
+                    routineGroupsSkipped = routineGroupsSkipped,
                     entitiesWithErrors = entitiesWithErrors,
                 ),
             )
@@ -1038,6 +1063,7 @@ abstract class BaseDataBackupManager(
                                                         strengthProfile = session.strengthProfile,
                                                         formScore = session.formScore,
                                                         profile_id = session.profileId ?: "default",
+                                                        display_multiplier = null,
                                                     )
                                                 }
                                                 if (inserted != null) {
@@ -1158,6 +1184,7 @@ abstract class BaseDataBackupManager(
                                                     lastUsed = routine.lastUsed,
                                                     useCount = routine.useCount.toLong(),
                                                     profile_id = routine.profileId ?: "default",
+                                                    groupId = routine.groupId,
                                                 )
                                                 routinesImported++
                                                 importedRoutineIds.add(routine.id)
@@ -1292,6 +1319,7 @@ abstract class BaseDataBackupManager(
                                                     volume = pr.volume.toDouble(),
                                                     phase = pr.phase ?: "COMBINED",
                                                     profile_id = pr.profileId ?: "default",
+                                                    cable_count = null,
                                                 )
                                                 personalRecordsImported++
                                             } catch (e: Exception) {
@@ -1835,6 +1863,11 @@ abstract class BaseDataBackupManager(
         // on legacy DBs where the table is missing; v1 backups simply emit an empty array.
         val sessionNotes = runCatching { queries.selectAllSessionNotesSync().executeAsList() }.getOrElse { emptyList() }
         writeJsonArray(writer, "sessionNotes", sessionNotes.map { json.encodeToString(SessionNotesBackup.serializer(), mapSessionNotesToBackup(it)) })
+        writer.write(",")
+
+        // Routine groups (migration 27). Same defensive pattern.
+        val routineGroups = runCatching { queries.selectAllRoutineGroupsSync().executeAsList() }.getOrElse { emptyList() }
+        writeJsonArray(writer, "routineGroups", routineGroups.map { json.encodeToString(RoutineGroupBackup.serializer(), mapRoutineGroupToBackup(it)) })
 
         // Close JSON
         writer.write("}}")
@@ -2163,6 +2196,7 @@ abstract class BaseDataBackupManager(
             heaviestLiftKg = session.heaviestLiftKg?.toFloat(),
             totalVolumeKg = session.totalVolumeKg?.toFloat(),
             cableCount = session.cableCount?.toInt(),
+            displayMultiplier = session.display_multiplier?.toInt(),
             estimatedCalories = session.estimatedCalories?.toFloat(),
             warmupAvgWeightKg = session.warmupAvgWeightKg?.toFloat(),
             workingAvgWeightKg = session.workingAvgWeightKg?.toFloat(),
@@ -2201,6 +2235,7 @@ abstract class BaseDataBackupManager(
         lastUsed = routine.lastUsed,
         useCount = routine.useCount.toInt(),
         profileId = routine.profile_id,
+        groupId = routine.groupId,
     )
 
     private fun mapRoutineExerciseToBackup(exercise: RoutineExercise): RoutineExerciseBackup = RoutineExerciseBackup(
@@ -2260,6 +2295,7 @@ abstract class BaseDataBackupManager(
         volume = pr.volume.toFloat(),
         phase = pr.phase,
         profileId = pr.profile_id,
+        cableCount = pr.cable_count?.toInt(),
     )
 
     private fun mapTrainingCycleToBackup(cycle: TrainingCycle): TrainingCycleBackup = TrainingCycleBackup(
@@ -2380,6 +2416,14 @@ abstract class BaseDataBackupManager(
         routineSessionId = sn.routineSessionId,
         notes = sn.notes,
         updatedAt = sn.updatedAt,
+    )
+
+    private fun mapRoutineGroupToBackup(rg: RoutineGroup): RoutineGroupBackup = RoutineGroupBackup(
+        id = rg.id,
+        name = rg.name,
+        orderIndex = rg.orderIndex.toInt(),
+        createdAt = rg.createdAt,
+        profileId = rg.profile_id,
     )
 
     private fun mapUserProfileToBackup(up: UserProfile): UserProfileBackup = UserProfileBackup(

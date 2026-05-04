@@ -71,6 +71,7 @@ data class WorkoutSessionSyncDto(
     val totalReps: Int = 0,
     val exerciseId: String? = null,
     val exerciseName: String? = null,
+    val displayMultiplier: Int? = null,
     val deletedAt: Long? = null,
     val createdAt: Long,
     val updatedAt: Long,
@@ -90,6 +91,7 @@ data class PersonalRecordSyncDto(
     val prType: String = "MAX_WEIGHT",
     val phase: String = "COMBINED",
     val volume: Float = 0f,
+    val cableCount: Int? = null,
     val deletedAt: Long? = null,
     val createdAt: Long,
     val updatedAt: Long,
@@ -111,6 +113,7 @@ data class CustomExerciseSyncDto(
     val clientId: String,
     val serverId: String? = null,
     val name: String,
+    val displayName: String? = null,  // Disambiguated name (#404)
     val muscleGroup: String,
     val equipment: String,
     val defaultCableConfig: String,

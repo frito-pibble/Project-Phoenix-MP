@@ -82,6 +82,10 @@ data class WorkoutUiState(
     val totalWarmupSets: Int = 0,
     // Issue #113: Just Lift visual rest countdown (null = not resting, 0 = done)
     val justLiftRestCountdown: Int? = null,
+    // Issue #190: Exercise timer pause state for timed exercise controls
+    val isExerciseTimerPaused: Boolean = false,
+    // Issue #313: VBT velocity loss threshold for HUD visualization
+    val velocityLossThresholdPercent: Int = 20,
 ) {
     /** True when currently executing a variable warm-up set (for HUD label) */
     val isInVariableWarmup: Boolean get() = currentWarmupSetIndex >= 0
@@ -169,6 +173,15 @@ interface WorkoutActions {
 
     /** Dismiss detection sheet without confirming */
     fun onDetectionDismissed()
+
+    /** Pause the exercise timer for timed exercises (Issue #190) */
+    fun onPauseExerciseTimer()
+
+    /** Resume the exercise timer for timed exercises (Issue #190) */
+    fun onResumeExerciseTimer()
+
+    /** Reset the exercise timer to original duration (Issue #190) */
+    fun onResetExerciseTimer()
 }
 
 /**
@@ -198,6 +211,9 @@ object PreviewWorkoutActions : WorkoutActions {
     override fun formatWeight(weight: Float, unit: WeightUnit): String = "${weight.toInt()} kg"
     override suspend fun onDetectionConfirmed(exerciseId: String, exerciseName: String) {}
     override fun onDetectionDismissed() {}
+    override fun onPauseExerciseTimer() {}
+    override fun onResumeExerciseTimer() {}
+    override fun onResetExerciseTimer() {}
 }
 
 /**
@@ -228,6 +244,9 @@ fun workoutActions(
     formatWeight: (Float, WeightUnit) -> String,
     onDetectionConfirmed: suspend (String, String) -> Unit = { _, _ -> },
     onDetectionDismissed: () -> Unit = {},
+    onPauseExerciseTimer: () -> Unit = {},
+    onResumeExerciseTimer: () -> Unit = {},
+    onResetExerciseTimer: () -> Unit = {},
 ): WorkoutActions = object : WorkoutActions {
     override fun onScan() = onScan()
     override fun onCancelScan() = onCancelScan()
@@ -252,4 +271,7 @@ fun workoutActions(
     override fun formatWeight(weight: Float, unit: WeightUnit) = formatWeight(weight, unit)
     override suspend fun onDetectionConfirmed(exerciseId: String, exerciseName: String) = onDetectionConfirmed(exerciseId, exerciseName)
     override fun onDetectionDismissed() = onDetectionDismissed()
+    override fun onPauseExerciseTimer() = onPauseExerciseTimer()
+    override fun onResumeExerciseTimer() = onResumeExerciseTimer()
+    override fun onResetExerciseTimer() = onResetExerciseTimer()
 }

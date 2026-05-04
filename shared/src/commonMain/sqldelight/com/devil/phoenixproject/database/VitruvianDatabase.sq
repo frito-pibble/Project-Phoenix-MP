@@ -5,6 +5,7 @@
 CREATE TABLE Exercise (
     id TEXT NOT NULL PRIMARY KEY,
     name TEXT NOT NULL,
+    displayName TEXT,
     description TEXT,
     created INTEGER NOT NULL DEFAULT 0,
     muscleGroup TEXT NOT NULL,
@@ -102,7 +103,9 @@ CREATE TABLE WorkoutSession (
     serverId TEXT,
     deletedAt INTEGER,
     -- Multi-profile support (added in migration 21)
-    profile_id TEXT NOT NULL DEFAULT 'default'
+    profile_id TEXT NOT NULL DEFAULT 'default',
+    -- Equipment-aware weight display (added in migration 29)
+    display_multiplier INTEGER
 );
 
 CREATE INDEX idx_workout_session_timestamp ON WorkoutSession(timestamp);
@@ -146,11 +149,24 @@ CREATE TABLE PersonalRecord (
     serverId TEXT,
     deletedAt INTEGER,
     -- Multi-profile support (added in migration 21)
-    profile_id TEXT NOT NULL DEFAULT 'default'
+    profile_id TEXT NOT NULL DEFAULT 'default',
+    -- Cable-aware weight display (added in migration 28)
+    cable_count INTEGER
 );
 
 CREATE UNIQUE INDEX idx_pr_unique ON PersonalRecord(exerciseId, workoutMode, prType, phase, profile_id);
 CREATE INDEX idx_pr_profile ON PersonalRecord(profile_id);
+
+-- Routine Groups (local-only organizational buckets, added in migration 27)
+CREATE TABLE RoutineGroup (
+    id TEXT PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL,
+    orderIndex INTEGER NOT NULL DEFAULT 0,
+    createdAt INTEGER NOT NULL,
+    profile_id TEXT NOT NULL DEFAULT 'default'
+);
+
+CREATE INDEX idx_routine_group_profile ON RoutineGroup(profile_id);
 
 -- Custom routines
 CREATE TABLE Routine (
@@ -165,7 +181,9 @@ CREATE TABLE Routine (
     serverId TEXT,
     deletedAt INTEGER,
     -- Multi-profile support (added in migration 21)
-    profile_id TEXT NOT NULL DEFAULT 'default'
+    profile_id TEXT NOT NULL DEFAULT 'default',
+    -- Routine group assignment (added in migration 27, local-only)
+    groupId TEXT REFERENCES RoutineGroup(id) ON DELETE SET NULL
 );
 
 CREATE INDEX idx_routine_profile ON Routine(profile_id);
@@ -440,12 +458,12 @@ UPDATE Exercise SET isFavorite = ? WHERE id = ?;
 
 insertExercise:
 INSERT OR REPLACE INTO Exercise (
-    id, name, description, created, muscleGroup, muscleGroups, muscles,
+    id, name, displayName, description, created, muscleGroup, muscleGroups, muscles,
     equipment, movement, sidedness, grip, gripWidth, minRepRange,
     popularity, archived, isFavorite, isCustom, timesPerformed, lastPerformed,
     aliases, defaultCableConfig, one_rep_max_kg
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 countExercises:
 SELECT COUNT(*) FROM Exercise;
@@ -549,9 +567,10 @@ INSERT INTO WorkoutSession (
     warmupAvgWeightKg, workingAvgWeightKg, burnoutAvgWeightKg, peakWeightKg, rpe,
     avgMcvMmS, avgAsymmetryPercent, totalVelocityLossPercent, dominantSide, strengthProfile,
     formScore,
-    profile_id
+    profile_id,
+    display_multiplier
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- Insert session only if ID doesn't already exist (for sync pull deduplication).
 -- Includes updatedAt to prevent re-push (selectSessionsModifiedSince picks up updatedAt IS NULL).
@@ -569,9 +588,10 @@ INSERT OR IGNORE INTO WorkoutSession (
     avgMcvMmS, avgAsymmetryPercent, totalVelocityLossPercent, dominantSide, strengthProfile,
     formScore,
     updatedAt,
-    profile_id
+    profile_id,
+    display_multiplier
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- Phase 3.3 (audit item #1): LWW write — overwrite existing row whose
 -- id matches. The repository gates this with a prior selectSessionUpdatedAt
@@ -592,9 +612,10 @@ INSERT OR REPLACE INTO WorkoutSession (
     avgMcvMmS, avgAsymmetryPercent, totalVelocityLossPercent, dominantSide, strengthProfile,
     formScore,
     updatedAt,
-    profile_id
+    profile_id,
+    display_multiplier
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 updateSession:
 UPDATE WorkoutSession
@@ -639,6 +660,13 @@ DELETE FROM MetricSample WHERE sessionId = ?;
 -- Average set duration for a specific exercise (Issue #225: routine time estimation)
 selectAverageSetDurationMs:
 SELECT AVG(duration) AS avgDurationMs
+FROM WorkoutSession
+WHERE exerciseId = ? AND duration > 0
+AND profile_id = :profileId;
+
+-- Count sessions for a specific exercise (Issue #225: minimum session threshold for time estimation)
+selectSessionCountForExercise:
+SELECT COUNT(*)
 FROM WorkoutSession
 WHERE exerciseId = ? AND duration > 0
 AND profile_id = :profileId;
@@ -731,24 +759,24 @@ SELECT * FROM PersonalRecord WHERE profile_id = :profileId ORDER BY exerciseId, 
 
 -- Insert a new PR (with prType, volume, and phase support)
 insertRecord:
-INSERT INTO PersonalRecord (exerciseId, exerciseName, weight, reps, oneRepMax, achievedAt, workoutMode, prType, volume, phase, profile_id)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO PersonalRecord (exerciseId, exerciseName, weight, reps, oneRepMax, achievedAt, workoutMode, prType, volume, phase, profile_id, cable_count)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- Upsert PR (insert or replace) - requires ID
 upsertRecord:
-INSERT OR REPLACE INTO PersonalRecord (id, exerciseId, exerciseName, weight, reps, oneRepMax, achievedAt, workoutMode, prType, volume, phase, profile_id)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO PersonalRecord (id, exerciseId, exerciseName, weight, reps, oneRepMax, achievedAt, workoutMode, prType, volume, phase, profile_id, cable_count)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- Upsert PR by unique key (exerciseId, workoutMode, prType, phase) - no ID required
 -- Uses INSERT OR REPLACE which replaces on unique index conflict (idx_pr_unique)
 upsertPR:
-INSERT OR REPLACE INTO PersonalRecord (exerciseId, exerciseName, weight, reps, oneRepMax, achievedAt, workoutMode, prType, volume, phase, profile_id)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO PersonalRecord (exerciseId, exerciseName, weight, reps, oneRepMax, achievedAt, workoutMode, prType, volume, phase, profile_id, cable_count)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- Insert PR but ignore on conflict (local wins) - for portal pull merge
 insertPRIgnore:
-INSERT OR IGNORE INTO PersonalRecord (exerciseId, exerciseName, weight, reps, oneRepMax, achievedAt, workoutMode, prType, volume, phase, profile_id)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR IGNORE INTO PersonalRecord (exerciseId, exerciseName, weight, reps, oneRepMax, achievedAt, workoutMode, prType, volume, phase, profile_id, cable_count)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- Delete PR by unique key (for upsert fallback)
 deletePRByKey:
@@ -771,12 +799,12 @@ selectRoutineById:
 SELECT * FROM Routine WHERE id = ?;
 
 insertRoutine:
-INSERT INTO Routine (id, name, description, createdAt, lastUsed, useCount, profile_id) VALUES (?, ?, ?, ?, ?, ?, ?);
+INSERT INTO Routine (id, name, description, createdAt, lastUsed, useCount, profile_id, groupId) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 
 -- Upsert routine (insert or replace) - handles both new and existing routines
 upsertRoutine:
-INSERT OR REPLACE INTO Routine (id, name, description, createdAt, lastUsed, useCount, updatedAt, profile_id)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO Routine (id, name, description, createdAt, lastUsed, useCount, updatedAt, profile_id, groupId)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 updateRoutineLastUsed:
 UPDATE Routine SET lastUsed = ?, useCount = useCount + 1 WHERE id = ?;
@@ -787,6 +815,35 @@ SELECT * FROM Routine;
 
 selectAllRoutineIds:
 SELECT id FROM Routine;
+
+-- ==================== ROUTINE GROUP QUERIES ====================
+
+selectAllRoutineGroups:
+SELECT * FROM RoutineGroup WHERE profile_id = :profileId ORDER BY orderIndex ASC, name ASC;
+
+selectRoutineGroupById:
+SELECT * FROM RoutineGroup WHERE id = ?;
+
+insertRoutineGroup:
+INSERT INTO RoutineGroup (id, name, orderIndex, createdAt, profile_id)
+VALUES (?, ?, ?, ?, ?);
+
+updateRoutineGroup:
+UPDATE RoutineGroup SET name = ?, orderIndex = ? WHERE id = ?;
+
+deleteRoutineGroup:
+DELETE FROM RoutineGroup WHERE id = ?;
+
+updateRoutineGroupId:
+UPDATE Routine SET groupId = ? WHERE id = ?;
+
+-- Backup queries for routine groups
+selectAllRoutineGroupsSync:
+SELECT * FROM RoutineGroup;
+
+insertRoutineGroupIgnore:
+INSERT OR IGNORE INTO RoutineGroup (id, name, orderIndex, createdAt, profile_id)
+VALUES (?, ?, ?, ?, ?);
 
 -- Routine Exercise Queries
 selectExercisesByRoutine:
@@ -1832,9 +1889,10 @@ INSERT OR REPLACE INTO WorkoutSession (
     avgMcvMmS, avgAsymmetryPercent, totalVelocityLossPercent, dominantSide, strengthProfile,
     formScore,
     updatedAt, serverId, deletedAt,
-    profile_id
+    profile_id,
+    display_multiplier
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- Get PRs modified since last sync
 selectPRsModifiedSince:

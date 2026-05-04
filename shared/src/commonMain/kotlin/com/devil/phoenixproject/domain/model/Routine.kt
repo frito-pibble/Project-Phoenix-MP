@@ -4,6 +4,18 @@ import kotlin.math.roundToInt
 import kotlinx.serialization.Serializable
 
 /**
+ * Named group for organizing routines.
+ * Groups are local-only in v1 (not synced to portal).
+ */
+data class RoutineGroup(
+    val id: String,
+    val name: String,
+    val profileId: String = "default",
+    val orderIndex: Int = 0,
+    val createdAt: Long = currentTimeMillis(),
+)
+
+/**
  * A single warm-up set definition for a routine exercise.
  *
  * Warm-up sets execute before working sets with reduced weight.
@@ -33,6 +45,7 @@ data class Routine(
     val lastUsed: Long? = null,
     val useCount: Int = 0,
     val profileId: String = "default",
+    val groupId: String? = null, // Routine group assignment (local-only, v1)
 ) {
     /**
      * Get all items (supersets + standalone exercises) in display order.
@@ -180,7 +193,17 @@ private fun Float.roundToHalfKg(): Float = (this * 2).roundToInt() / 2f
 /**
  * Round to nearest given increment.
  * Issue #266: Configurable weight rounding for user-facing values.
+ *
+ * @deprecated Use [com.devil.phoenixproject.util.UnitConverter.roundToIncrement] instead.
+ * This extension function is a duplicate; consolidating to a single implementation.
  */
+@Deprecated(
+    message = "Use UnitConverter.roundToIncrement(value, increment) instead",
+    replaceWith = ReplaceWith(
+        "com.devil.phoenixproject.util.UnitConverter.roundToIncrement(this, increment)",
+        "com.devil.phoenixproject.util.UnitConverter",
+    ),
+)
 fun Float.roundToIncrement(increment: Float): Float {
     if (increment <= 0f) return this
     return (kotlin.math.round(this / increment) * increment)

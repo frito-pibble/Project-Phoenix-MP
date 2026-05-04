@@ -127,6 +127,7 @@ class ExerciseConfigViewModelTest {
             volume = 330.0,
             phase = "COMBINED",
             profile_id = "default",
+            cable_count = null,
         )
         queries.insertRecord(
             exerciseId = "bench-1",
@@ -140,6 +141,7 @@ class ExerciseConfigViewModelTest {
             volume = 362.5,
             phase = "COMBINED",
             profile_id = "profile-b",
+            cable_count = null,
         )
 
         viewModel.initialize(
@@ -172,6 +174,7 @@ class ExerciseConfigViewModelTest {
         queries.insertExercise(
             id = id,
             name = name,
+            displayName = null,
             description = null,
             created = 0L,
             muscleGroup = "Chest",

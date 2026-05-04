@@ -49,7 +49,7 @@ internal fun applyMigrationResilient(
  * Get the SQL statements for a specific migration version.
  *
  * These mirror the .sqm files exactly, split into individual statements so
- * the resilient executor can apply them one-by-one. Every version from 1-27
+ * the resilient executor can apply them one-by-one. Every version from 1-30
  * is covered. Version 18 is intentionally empty (NOOP).
  */
 internal fun getMigrationStatements(version: Int): List<String> = when (version) {
@@ -587,7 +587,7 @@ FROM EarnedBadge""",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_earned_badge_profile ON EarnedBadge(badgeId, profile_id)",
     )
 
-    // Migration 25: Deduplicate GamificationStats rows and enforce one row per profile
+    // Migration 25: Deduplicate GamificationStats rows and enforce one-row-per-profile
     25 -> listOf(
         "DROP INDEX IF EXISTS idx_gamification_stats_profile",
         """CREATE TABLE IF NOT EXISTS GamificationStats_rebuild (
@@ -660,9 +660,33 @@ WHERE gs.rowid = (
         "CREATE INDEX IF NOT EXISTS idx_session_notes_updated_at ON SessionNotes(updatedAt)",
     )
 
-    // Migration 27: TrainingCycle soft-delete for sync tombstone propagation
+    // Migration 27: Routine Groups + TrainingCycle soft-delete
     27 -> listOf(
+        """CREATE TABLE IF NOT EXISTS RoutineGroup (
+            id TEXT PRIMARY KEY NOT NULL,
+            name TEXT NOT NULL,
+            orderIndex INTEGER NOT NULL DEFAULT 0,
+            createdAt INTEGER NOT NULL,
+            profile_id TEXT NOT NULL DEFAULT 'default'
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_routine_group_profile ON RoutineGroup(profile_id)",
+        "ALTER TABLE Routine ADD COLUMN groupId TEXT REFERENCES RoutineGroup(id) ON DELETE SET NULL",
         "ALTER TABLE TrainingCycle ADD COLUMN deletedAt INTEGER",
+    )
+
+    // Migration 28: Cable-aware PersonalRecord weight display
+    28 -> listOf(
+        "ALTER TABLE PersonalRecord ADD COLUMN cable_count INTEGER",
+    )
+
+    // Migration 29: Equipment-aware weight display
+    29 -> listOf(
+        "ALTER TABLE WorkoutSession ADD COLUMN display_multiplier INTEGER",
+    )
+
+    // Migration 30: Exercise display name
+    30 -> listOf(
+        "ALTER TABLE Exercise ADD COLUMN displayName TEXT",
     )
 
     else -> emptyList()

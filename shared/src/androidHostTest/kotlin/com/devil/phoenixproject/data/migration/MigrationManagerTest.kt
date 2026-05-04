@@ -116,6 +116,7 @@ class MigrationManagerTest {
             lastUsed = null,
             useCount = 0,
             profile_id = "default",
+            groupId = null,
         )
         insertMinimalRoutineExercise(
             id = "re-bench",
@@ -150,6 +151,7 @@ class MigrationManagerTest {
             lastUsed = null,
             useCount = 0,
             profile_id = "default",
+            groupId = null,
         )
         insertMinimalRoutineExercise(
             id = "re-bench",
@@ -225,6 +227,7 @@ class MigrationManagerTest {
             volume = 500.0,
             phase = "COMBINED",
             profile_id = "default",
+            cable_count = null,
         )
         queries.insertRecord(
             exerciseId = "deadlift",
@@ -238,6 +241,7 @@ class MigrationManagerTest {
             volume = 500.0,
             phase = "COMBINED",
             profile_id = "default",
+            cable_count = null,
         )
 
         migrationManager.checkAndRunMigrations()
@@ -286,6 +290,7 @@ class MigrationManagerTest {
             volume = 560.0,
             phase = "COMBINED",
             profile_id = "profile-b",
+            cable_count = null,
         )
         queries.insertRecord(
             exerciseId = "deadlift",
@@ -299,6 +304,7 @@ class MigrationManagerTest {
             volume = 520.0,
             phase = "COMBINED",
             profile_id = "profile-b",
+            cable_count = null,
         )
 
         migrationManager.checkAndRunMigrations()
@@ -496,6 +502,7 @@ class MigrationManagerTest {
         database.vitruvianDatabaseQueries.insertExercise(
             id = id,
             name = name,
+            displayName = null,
             description = null,
             created = 0L,
             muscleGroup = "Back",
@@ -618,6 +625,7 @@ class MigrationManagerTest {
             strengthProfile = null,
             formScore = null,
             profile_id = profileId,
+            display_multiplier = null,
         )
     }
 }
