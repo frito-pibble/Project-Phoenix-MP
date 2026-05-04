@@ -133,6 +133,8 @@ fun RestTimerCard(
     onUpdateEccentricLoad: ((Int) -> Unit)? = null,
     // Issue #222: Flag to indicate next exercise is bodyweight (no config card needed)
     isNextExerciseBodyweight: Boolean = false,
+    // Issue #266/#410: Configurable weight step from user preferences
+    weightStepKg: Float = 0.25f,
     modifier: Modifier = Modifier,
 ) {
     // Local state for editing parameters
@@ -485,7 +487,7 @@ fun RestTimerCard(
                             // Non-Echo modes: Show weight adjuster
                             if (nextExerciseWeight != null && formatWeightWithUnit != null) {
                                 val maxWeightKg = Constants.MAX_WEIGHT_PER_CABLE_KG
-                                val weightStepKg = 0.25f
+                                // Issue #266/#410: weightStepKg now comes from parameter
 
                                 // Delta from baseline (nextExerciseWeight is the routine-configured weight in kg)
                                 val baselineWeightKg = nextExerciseWeight

@@ -1,8 +1,15 @@
 package com.devil.phoenixproject.presentation.screen
 
 import com.devil.phoenixproject.data.repository.AutoStopUiState
-import com.devil.phoenixproject.domain.model.*
 import com.devil.phoenixproject.domain.model.BiomechanicsRepResult
+import com.devil.phoenixproject.domain.model.ConnectionState
+import com.devil.phoenixproject.domain.model.ProgramMode
+import com.devil.phoenixproject.domain.model.RepCount
+import com.devil.phoenixproject.domain.model.Routine
+import com.devil.phoenixproject.domain.model.WeightUnit
+import com.devil.phoenixproject.domain.model.WorkoutMetric
+import com.devil.phoenixproject.domain.model.WorkoutParameters
+import com.devil.phoenixproject.domain.model.WorkoutState
 import com.devil.phoenixproject.domain.usecase.RepRanges
 import com.devil.phoenixproject.presentation.manager.DetectionState
 
@@ -86,6 +93,8 @@ data class WorkoutUiState(
     val isExerciseTimerPaused: Boolean = false,
     // Issue #313: VBT velocity loss threshold for HUD visualization
     val velocityLossThresholdPercent: Int = 20,
+    // Issue #266/#410: Configurable weight step from user preferences (kg)
+    val weightStepKg: Float = 0.25f,
 ) {
     /** True when currently executing a variable warm-up set (for HUD label) */
     val isInVariableWarmup: Boolean get() = currentWarmupSetIndex >= 0

@@ -28,13 +28,12 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.automirrored.filled.TrendingUp
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -43,6 +42,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -50,6 +50,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateSetOf
@@ -77,7 +78,6 @@ import com.devil.phoenixproject.presentation.components.BulkWeightAdjustDialog
 import com.devil.phoenixproject.presentation.components.ExercisePickerDialog
 import com.devil.phoenixproject.presentation.components.ExerciseRowInSuperset
 import com.devil.phoenixproject.presentation.components.ExerciseRowWithConnector
-import com.devil.phoenixproject.presentation.components.RestTimePickerDialog
 import com.devil.phoenixproject.presentation.components.SelectionActionBar
 import com.devil.phoenixproject.presentation.components.SupersetContainer
 import com.devil.phoenixproject.presentation.components.SupersetHeader
@@ -128,6 +128,9 @@ fun RoutineEditorScreen(
     displayToKg: (Float, WeightUnit) -> Float,
     enableVideoPlayback: Boolean,
 ) {
+    // Issue #266/#410: Get user preferences for weight increment
+    val userPreferences by viewModel.userPreferences.collectAsState()
+
     // 1. Initialize State
     var state by remember { mutableStateOf(RoutineEditorState()) }
     var showExercisePicker by remember { mutableStateOf(false) }
@@ -824,6 +827,7 @@ fun RoutineEditorScreen(
                 val displayWeight = kgToDisplay(weight, unit)
                 if (unit == WeightUnit.LB) "${UnitConverter.formatDecimal(displayWeight)} lbs" else "${UnitConverter.formatDecimal(displayWeight)} kg"
             },
+            weightStepOverride = userPreferences.effectiveWeightIncrementKg, // Issue #266/#410
             onSave = { configuredExercise ->
                 if (isNewExercise) {
                     updateExercises(state.exercises + configuredExercise)

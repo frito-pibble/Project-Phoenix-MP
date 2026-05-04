@@ -2,14 +2,62 @@ package com.devil.phoenixproject.presentation.screen
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeGestures
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.BluetoothDisabled
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -19,8 +67,17 @@ import androidx.compose.ui.unit.dp
 import com.devil.phoenixproject.data.repository.AutoStopUiState
 import com.devil.phoenixproject.data.repository.ExerciseRepository
 import com.devil.phoenixproject.data.repository.ExerciseVideoEntity
-import com.devil.phoenixproject.domain.model.*
 import com.devil.phoenixproject.domain.model.BiomechanicsRepResult
+import com.devil.phoenixproject.domain.model.ConnectionState
+import com.devil.phoenixproject.domain.model.Exercise
+import com.devil.phoenixproject.domain.model.HapticEvent
+import com.devil.phoenixproject.domain.model.ProgramMode
+import com.devil.phoenixproject.domain.model.RepCount
+import com.devil.phoenixproject.domain.model.Routine
+import com.devil.phoenixproject.domain.model.WeightUnit
+import com.devil.phoenixproject.domain.model.WorkoutMetric
+import com.devil.phoenixproject.domain.model.WorkoutParameters
+import com.devil.phoenixproject.domain.model.WorkoutState
 import com.devil.phoenixproject.domain.usecase.RepRanges
 import com.devil.phoenixproject.presentation.components.AutoStartOverlay
 import com.devil.phoenixproject.presentation.components.AutoStopOverlay
@@ -35,8 +92,26 @@ import com.devil.phoenixproject.ui.theme.Spacing
 import com.devil.phoenixproject.ui.theme.screenBackgroundBrush
 import kotlinx.coroutines.flow.SharedFlow
 import org.jetbrains.compose.resources.stringResource
-import vitruvianprojectphoenix.shared.generated.resources.*
 import vitruvianprojectphoenix.shared.generated.resources.Res
+import vitruvianprojectphoenix.shared.generated.resources.action_cancel
+import vitruvianprojectphoenix.shared.generated.resources.cd_configure_workout
+import vitruvianprojectphoenix.shared.generated.resources.cd_connection_lost
+import vitruvianprojectphoenix.shared.generated.resources.cd_disconnect
+import vitruvianprojectphoenix.shared.generated.resources.cd_scan_devices
+import vitruvianprojectphoenix.shared.generated.resources.cd_start_new_workout
+import vitruvianprojectphoenix.shared.generated.resources.cd_stop_workout
+import vitruvianprojectphoenix.shared.generated.resources.cd_workout_completed
+import vitruvianprojectphoenix.shared.generated.resources.cd_workout_error
+import vitruvianprojectphoenix.shared.generated.resources.connecting
+import vitruvianprojectphoenix.shared.generated.resources.disconnect
+import vitruvianprojectphoenix.shared.generated.resources.disconnect_message
+import vitruvianprojectphoenix.shared.generated.resources.disconnect_title
+import vitruvianprojectphoenix.shared.generated.resources.label_per_cable
+import vitruvianprojectphoenix.shared.generated.resources.not_connected
+import vitruvianprojectphoenix.shared.generated.resources.reconnect
+import vitruvianprojectphoenix.shared.generated.resources.scan
+import vitruvianprojectphoenix.shared.generated.resources.scanning_for_devices
+import vitruvianprojectphoenix.shared.generated.resources.stop_workout
 
 /**
  * WorkoutTab with State Holder Pattern (2025 Material Expressive).
@@ -121,6 +196,7 @@ fun WorkoutTab(
         onResumeExerciseTimer = actions::onResumeExerciseTimer,
         onResetExerciseTimer = actions::onResetExerciseTimer,
         velocityLossThresholdPercent = state.velocityLossThresholdPercent,
+        weightStepKg = state.weightStepKg,
     )
 }
 
@@ -200,6 +276,8 @@ fun WorkoutTab(
     onResetExerciseTimer: () -> Unit = {},
     // Issue #313: VBT velocity loss threshold for HUD visualization
     velocityLossThresholdPercent: Int = 20,
+    // Issue #266/#410: Configurable weight step from user preferences (kg)
+    weightStepKg: Float = 0.25f,
 ) {
     // Note: HapticFeedbackEffect is now global in EnhancedMainScreen
     // No need for local haptic effect here
@@ -503,6 +581,7 @@ fun WorkoutTab(
                         prWeight = workoutParameters.prWeightKg,
                         formatWeight = { weight -> formatWeight(weight, weightUnit) },
                         formatWeightWithUnit = formatWeight,
+                        weightStepKg = weightStepKg, // Issue #266/#410
                         isSupersetTransition = workoutState.isSupersetTransition,
                         supersetLabel = workoutState.supersetLabel,
                         isRestPaused = isRestPaused,

@@ -301,6 +301,7 @@ fun RoutineOverviewScreen(navController: NavController, viewModel: MainViewModel
                     echoLevel = adjustments.echoLevel,
                     eccentricLoadPercent = adjustments.eccentricLoadPercent,
                     sizing = overviewSizing,
+                    weightStepKg = userPreferences.effectiveWeightIncrementKg, // Issue #266/#410
                     onWeightChange = { newWeight ->
                         if (newWeight >= 0f) {
                             adjustmentState.value = adjustmentState.value.copy(weight = newWeight)
@@ -523,13 +524,13 @@ private fun ExerciseOverviewCard(
     echoLevel: EchoLevel,
     eccentricLoadPercent: Int,
     sizing: RoutineOverviewSizing,
+    weightStepKg: Float = 0.25f, // Issue #266/#410: Configurable weight step
     onWeightChange: (Float) -> Unit,
     onRepsChange: (Int) -> Unit,
     onEchoLevelChange: (EchoLevel) -> Unit,
     onEccentricLoadChange: (Int) -> Unit,
 ) {
     val maxWeightKg = Constants.MAX_WEIGHT_PER_CABLE_KG
-    val weightStepKg = 0.25f
 
     // Bodyweight = no cable accessories (handles, bar, rope, etc.) in equipment list
     val isBodyweight = !exercise.exercise.hasCableAccessory

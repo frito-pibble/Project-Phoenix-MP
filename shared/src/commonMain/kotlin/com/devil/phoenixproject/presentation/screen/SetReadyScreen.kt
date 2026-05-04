@@ -117,9 +117,10 @@ fun SetReadyScreen(navController: NavController, viewModel: MainViewModel, exerc
     // Bodyweight = no cable accessories (handles, bar, rope, etc.) in equipment list
     val isBodyweight = !currentExercise.exercise.hasCableAccessory
 
-    // Weight parameters matching RestTimerCard exactly
+    // Issue #266/#410: Use configured weight increment from user preferences
+    val userPreferences by viewModel.userPreferences.collectAsState()
     val maxWeightKg = Constants.MAX_WEIGHT_PER_CABLE_KG
-    val weightStepKg = 0.25f
+    val weightStepKg = userPreferences.effectiveWeightIncrementKg
 
     // Navigation state - uses superset-aware helpers from ViewModel
     val canGoPrev = viewModel.hasPreviousStep(setReadyState.exerciseIndex, setReadyState.setIndex)

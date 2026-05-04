@@ -30,13 +30,13 @@ import com.devil.phoenixproject.data.repository.UserProfileRepository
 import com.devil.phoenixproject.domain.model.Badge
 import com.devil.phoenixproject.domain.model.PRCelebrationEvent
 import com.devil.phoenixproject.domain.model.RoutineFlowState
-import com.devil.phoenixproject.presentation.util.WeightDisplayFormatter
 import com.devil.phoenixproject.domain.model.WorkoutState
 import com.devil.phoenixproject.presentation.components.BatchedBadgeCelebrationDialog
 import com.devil.phoenixproject.presentation.components.ConnectionErrorDialog
 import com.devil.phoenixproject.presentation.components.PRCelebrationDialog
 import com.devil.phoenixproject.presentation.manager.DefaultWorkoutSessionManager
 import com.devil.phoenixproject.presentation.navigation.NavigationRoutes
+import com.devil.phoenixproject.presentation.util.WeightDisplayFormatter
 import com.devil.phoenixproject.presentation.viewmodel.MainViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -357,6 +357,7 @@ fun ActiveWorkoutScreen(navController: NavController, viewModel: MainViewModel, 
         currentWarmupSetIndex, totalWarmupSets,
         justLiftRestCountdown, isExerciseTimerPaused,
         userPreferences.velocityLossThresholdPercent,
+        userPreferences.effectiveWeightIncrementKg,
     ) {
         WorkoutUiState(
             connectionState = connectionState,
@@ -395,6 +396,7 @@ fun ActiveWorkoutScreen(navController: NavController, viewModel: MainViewModel, 
             justLiftRestCountdown = justLiftRestCountdown,
             isExerciseTimerPaused = isExerciseTimerPaused,
             velocityLossThresholdPercent = userPreferences.velocityLossThresholdPercent,
+            weightStepKg = userPreferences.effectiveWeightIncrementKg,
         )
     }
 
