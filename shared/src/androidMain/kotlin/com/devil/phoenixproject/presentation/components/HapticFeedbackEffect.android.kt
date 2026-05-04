@@ -3,6 +3,7 @@ package com.devil.phoenixproject.presentation.components
 import android.annotation.SuppressLint
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.SoundPool
 import android.os.Build
@@ -17,8 +18,8 @@ import androidx.compose.ui.platform.LocalContext
 import co.touchlab.kermit.Logger
 import com.devil.phoenixproject.domain.model.HapticEvent
 import com.devil.phoenixproject.util.DeviceInfo
-import kotlin.random.Random
 import kotlinx.coroutines.flow.SharedFlow
+import kotlin.random.Random
 
 @Composable
 actual fun HapticFeedbackEffect(hapticEvents: SharedFlow<HapticEvent>) {
@@ -150,13 +151,38 @@ private fun loadSoundByName(context: Context, soundPool: SoundPool, name: String
         resId = context.resources.getIdentifier(name, "raw", context.packageName)
     }
 
-    if (resId == 0) return null
+    if (resId == 0) {
+        Logger.w { "Sound resource not found: '$name' (tried packages: $packageName, ${context.packageName})" }
+        return null
+    }
 
     return try {
         soundPool.load(context, resId, 1)
     } catch (e: Exception) {
-        Logger.e(e) { "Failed to load sound '$name'" }
+        Logger.e(e) { "Failed to load sound '$name' (resId=$resId)" }
         null
+    }
+}
+
+/**
+ * Issue #409: Check media volume and log warning if muted.
+ * USAGE_GAME routes to STREAM_MUSIC — if media volume is 0, all sounds are inaudible.
+ * Requires Activity.volumeControlStream = AudioManager.STREAM_MUSIC to let
+ * hardware volume buttons control the correct stream.
+ */
+private fun warnIfMediaVolumeMuted(context: Context) {
+    try {
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+        val currentVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        if (currentVolume == 0) {
+            val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            Logger.w {
+                "Issue #409: Media volume is 0/$maxVolume — workout sounds will be inaudible. " +
+                    "Sounds use USAGE_GAME (STREAM_MUSIC). Raise media volume to hear audio cues."
+            }
+        }
+    } catch (_: Exception) {
+        // Non-critical diagnostic — don't crash
     }
 }
 
@@ -177,6 +203,9 @@ private fun playSound(
 ) {
     // ERROR event has no sound
     if (event is HapticEvent.ERROR) return
+
+    // Issue #409: Log warning if media volume is muted
+    warnIfMediaVolumeMuted(context)
 
     // Fire OS: Always use MediaPlayer (SoundPool has volume bug)
     if (DeviceInfo.isFireOS()) {
@@ -216,7 +245,14 @@ private fun playSound(
     }
 
     if (soundId == null) {
-        // Try MediaPlayer fallback for key events
+        Logger.d { "No SoundPool ID for event $event — falling back to MediaPlayer" }
+        playWithMediaPlayer(event, context)
+        return
+    }
+
+    // Issue #409: Check if sound has finished async loading before attempting playback
+    if (soundId !in loadedSounds) {
+        Logger.d { "Sound $soundId not yet loaded for $event — using MediaPlayer fallback" }
         playWithMediaPlayer(event, context)
         return
     }
@@ -232,9 +268,11 @@ private fun playSound(
         )
         // If SoundPool fails, try MediaPlayer fallback
         if (streamId == 0) {
+            Logger.d { "SoundPool.play returned 0 for $event (soundId=$soundId) — MediaPlayer fallback" }
             playWithMediaPlayer(event, context)
         }
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        Logger.w(e) { "SoundPool.play threw for $event — MediaPlayer fallback" }
         playWithMediaPlayer(event, context)
     }
 }
