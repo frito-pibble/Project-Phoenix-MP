@@ -225,6 +225,15 @@ object BlePacketFactory {
 
         val softMax = if (params.isAMRAP || params.isJustLift) 100.0f else params.weightPerCableKg
 
+        // Issue #390: Detect suspiciously low weight values that would cause the machine
+        // to start at near-zero and ramp up slowly instead of the configured weight.
+        if (!params.isJustLift && params.weightPerCableKg > 0f && params.weightPerCableKg < 2f) {
+            Logger.w("BlePacket") {
+                "Issue #390: weightPerCableKg=${params.weightPerCableKg}kg is suspiciously low. " +
+                    "Expected > 2kg for a working set. Check weight resolution pipeline."
+            }
+        }
+
         if (effectiveVariant == ForceConfigVariant.OVERLAP) {
             // Issue #262: Firmware reads softMax at 0x48 and increment at 0x4C.
             // These overlap the last 8 bytes of the mode profile, but the firmware

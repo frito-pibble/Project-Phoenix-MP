@@ -1336,4 +1336,125 @@ class BlePacketFactoryTest {
         // TUT Beast uses default bottom.inner.mmPerM = 250 (NOT the Eccentric 50)
         assertEquals(250.toShort(), readShortLE(packet, 0x24), "bottom.inner.mmPerM (default)")
     }
+
+    // ========== Issue #390 Regression: Calf Raise Weight Scenario ==========
+    // Reproduces the exact user scenario: OldSchool calf raise at ~40kg per cable
+    // (80% of PR), with ~0.907kg/rep progression (2 lbs displayed = 0.907 kg).
+    // Machine was starting at ~3.7kg per cable instead of ~40kg.
+
+    @Test
+    fun `issue390 calf raise OldSchool weight lands at correct offsets`() {
+        // User scenario: 80% of 100 kg PR = 80 kg total = 40 kg per cable
+        // Progression: 2 lbs/rep displayed → 2 / 2.20462 ≈ 0.907 kg per cable
+        val weightPerCableKg = 40.0f
+        val progressionKg = 0.907f
+
+        val params = WorkoutParameters(
+            programMode = ProgramMode.OldSchool,
+            reps = 10,
+            weightPerCableKg = weightPerCableKg,
+            progressionRegressionKg = progressionKg,
+        )
+
+        val packet = BlePacketFactory.createProgramParams(params)
+
+        assertEquals(96, packet.size, "Packet must be 96 bytes")
+        assertEquals(0x04.toByte(), packet[0], "Command byte must be ACTIVATION (0x04)")
+
+        // OVERLAP offsets (0x48-0x4F) — firmware force config
+        val softMax = readFloatLE(packet, BleConstants.ActivationPacket.OFFSET_SOFT_MAX)
+        val increment = readFloatLE(packet, BleConstants.ActivationPacket.OFFSET_INCREMENT)
+        assertEquals(weightPerCableKg, softMax, "softMax at 0x48 must be weightPerCableKg (40kg)")
+        assertEquals(progressionKg, increment, "increment at 0x4C must be progressionKg (0.907kg)")
+
+        // Protocol force config (0x50-0x5F)
+        val adjustedWeight = weightPerCableKg - progressionKg  // 40 - 0.907 = 39.093
+        val forceMax = adjustedWeight + 10.0f                   // 49.093
+
+        assertEquals(0.0f, readFloatLE(packet, 0x50), "forceMin at 0x50 must be 0")
+        assertEquals(
+            forceMax,
+            readFloatLE(packet, 0x54),
+            "forceMax at 0x54 must be adjustedWeight + 10",
+        )
+        assertEquals(
+            adjustedWeight,
+            readFloatLE(packet, 0x58),
+            "targetWeight at 0x58 must be adjustedWeight",
+        )
+        assertEquals(
+            progressionKg,
+            readFloatLE(packet, 0x5C),
+            "progression at 0x5C must be progressionKg",
+        )
+
+        // Verify the weight is NOT near-zero (the actual bug symptom)
+        assertTrue(
+            softMax > 10f,
+            "Issue #390: softMax ($softMax kg) must not be near-zero. " +
+                "Expected ~40kg for calf raise at 80% of 100kg PR.",
+        )
+        assertTrue(
+            readFloatLE(packet, 0x58) > 10f,
+            "Issue #390: targetWeight must not be near-zero. " +
+                "Expected ~39kg for first set of calf raise.",
+        )
+    }
+
+    @Test
+    fun `issue390 near-zero weight still produces valid packet`() {
+        // If the bug is upstream (weight resolves to near-zero), verify the packet
+        // factory still writes whatever it receives correctly — the factory is not
+        // the guardrail, but the packet must at least be well-formed.
+        val params = WorkoutParameters(
+            programMode = ProgramMode.OldSchool,
+            reps = 10,
+            weightPerCableKg = 1.5f,  // Suspiciously low but valid
+            progressionRegressionKg = 0.5f,
+        )
+
+        val packet = BlePacketFactory.createProgramParams(params)
+
+        assertEquals(96, packet.size)
+        assertEquals(1.5f, readFloatLE(packet, 0x48), "softMax = weightPerCableKg even if low")
+        assertEquals(0.5f, readFloatLE(packet, 0x4C), "increment = progressionKg")
+        assertEquals(1.0f, readFloatLE(packet, 0x58), "targetWeight = 1.5 - 0.5")
+        assertEquals(11.0f, readFloatLE(packet, 0x54), "forceMax = 1.0 + 10")
+    }
+
+    @Test
+    fun `issue390 AMRAP mode sets softMax to 100 regardless of weight`() {
+        // AMRAP sets softMax=100 to allow unlimited reps — verify this path
+        // since AMRAP routines also use PR% weights
+        val params = WorkoutParameters(
+            programMode = ProgramMode.OldSchool,
+            reps = 10,
+            weightPerCableKg = 40.0f,
+            progressionRegressionKg = 0.907f,
+            isAMRAP = true,
+        )
+
+        val packet = BlePacketFactory.createProgramParams(params)
+
+        assertEquals(100.0f, readFloatLE(packet, 0x48), "AMRAP softMax must be 100 (unlimited)")
+        assertEquals(0.907f, readFloatLE(packet, 0x4C), "AMRAP increment still uses progressionKg")
+
+        // But targetWeight and forceMax still use actual weight
+        val adjusted = 40.0f - 0.907f
+        assertEquals(adjusted, readFloatLE(packet, 0x58), "AMRAP targetWeight uses actual weight")
+    }
+
+    @Test
+    fun `issue390 JustLift mode sets softMax to 100 regardless of weight`() {
+        val params = WorkoutParameters(
+            programMode = ProgramMode.OldSchool,
+            reps = 10,
+            weightPerCableKg = 40.0f,
+            isJustLift = true,
+        )
+
+        val packet = BlePacketFactory.createProgramParams(params)
+
+        assertEquals(100.0f, readFloatLE(packet, 0x48), "JustLift softMax must be 100 (unlimited)")
+    }
 }
