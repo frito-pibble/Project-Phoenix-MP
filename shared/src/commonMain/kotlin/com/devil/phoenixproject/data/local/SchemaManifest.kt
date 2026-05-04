@@ -940,7 +940,7 @@ internal val manifestColumns: List<SchemaHealOperation> = listOf(
     SchemaHealOperation("Exercise", "updatedAt", "ALTER TABLE Exercise ADD COLUMN updatedAt INTEGER"),
     SchemaHealOperation("Exercise", "serverId", "ALTER TABLE Exercise ADD COLUMN serverId TEXT"),
     SchemaHealOperation("Exercise", "deletedAt", "ALTER TABLE Exercise ADD COLUMN deletedAt INTEGER"),
-    // Migration 30: display name
+    // Migration 30: display name for formatted exercise names
     SchemaHealOperation("Exercise", "displayName", "ALTER TABLE Exercise ADD COLUMN displayName TEXT"),
 
     // ── WorkoutSession (31 columns) ─────────────────────────────────────
