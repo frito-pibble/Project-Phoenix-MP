@@ -421,6 +421,37 @@ class SmartSuggestionsEngineTest {
         assertEquals(MovementCategory.CORE, SmartSuggestionsEngine.classifyMuscleGroup(""))
     }
 
+    @Test
+    fun classifyMuscleGroupAliases() {
+        assertEquals(MovementCategory.LEGS, SmartSuggestionsEngine.classifyMuscleGroup("Quads"))
+        assertEquals(MovementCategory.LEGS, SmartSuggestionsEngine.classifyMuscleGroup("hamstrings"))
+        assertEquals(MovementCategory.LEGS, SmartSuggestionsEngine.classifyMuscleGroup("CALVES"))
+
+        assertEquals(MovementCategory.PULL, SmartSuggestionsEngine.classifyMuscleGroup("Lats"))
+        assertEquals(MovementCategory.PULL, SmartSuggestionsEngine.classifyMuscleGroup("traps"))
+        assertEquals(MovementCategory.PULL, SmartSuggestionsEngine.classifyMuscleGroup("Rear Delts"))
+
+        assertEquals(MovementCategory.PUSH, SmartSuggestionsEngine.classifyMuscleGroup("Front Delts"))
+        assertEquals(MovementCategory.PUSH, SmartSuggestionsEngine.classifyMuscleGroup("Side Delts"))
+    }
+
+    @Test
+    fun unknownMuscleGroupCallbackTracksTaxonomyGaps() {
+        val unknownGroups = mutableMapOf<String, Int>()
+        val tracker: (String) -> Unit = { group ->
+            unknownGroups[group] = (unknownGroups[group] ?: 0) + 1
+        }
+
+        SmartSuggestionsEngine.classifyMuscleGroup("Serratus", tracker)
+        SmartSuggestionsEngine.classifyMuscleGroup("Forearms", tracker)
+        SmartSuggestionsEngine.classifyMuscleGroup("  forearms ", tracker)
+
+        assertEquals(
+            mapOf("serratus" to 1, "forearms" to 2),
+            unknownGroups,
+        )
+    }
+
     // ========== classifyTimeWindow timezone fix (BOARD-01) ==========
 
     @Test

@@ -288,14 +288,25 @@ object SmartSuggestionsEngine {
 
     /**
      * Maps a muscle group string to a MovementCategory for balance analysis.
-     * Case-insensitive. Unknown groups default to CORE.
+     * Case-insensitive and supports aliases used by the exercise catalog.
+     * Unknown groups default to CORE and optionally report normalized taxonomy gaps
+     * through onUnknownGroup.
      */
-    internal fun classifyMuscleGroup(muscleGroup: String): MovementCategory = when (muscleGroup.lowercase().trim()) {
-        "chest", "shoulders", "triceps" -> MovementCategory.PUSH
-        "back", "biceps" -> MovementCategory.PULL
-        "legs", "glutes" -> MovementCategory.LEGS
-        "core", "full body" -> MovementCategory.CORE
-        else -> MovementCategory.CORE
+    internal fun classifyMuscleGroup(
+        muscleGroup: String,
+        onUnknownGroup: ((String) -> Unit)? = null,
+    ): MovementCategory {
+        val normalized = muscleGroup.lowercase().trim()
+        return when (normalized) {
+            "chest", "pecs", "pectorals", "shoulders", "triceps", "front delts", "anterior delts", "side delts", "lateral delts" -> MovementCategory.PUSH
+            "back", "biceps", "lats", "latissimus", "traps", "trapezius", "rear delts", "posterior delts", "rhomboids" -> MovementCategory.PULL
+            "legs", "glutes", "quads", "quadriceps", "hamstrings", "hams", "calves", "adductors", "abductors" -> MovementCategory.LEGS
+            "core", "abs", "abdominals", "obliques", "lower back", "full body" -> MovementCategory.CORE
+            else -> {
+                onUnknownGroup?.invoke(normalized)
+                MovementCategory.CORE
+            }
+        }
     }
 
     /**
