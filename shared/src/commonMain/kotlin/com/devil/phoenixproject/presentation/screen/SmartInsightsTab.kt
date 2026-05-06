@@ -108,7 +108,7 @@ private fun SmartInsightsContent(modifier: Modifier = Modifier) {
     val activeProfile by userProfileRepository.activeProfile.collectAsState()
     val profileId = activeProfile?.id ?: "default"
 
-    var nowMs by remember { mutableStateOf(currentTimeMillis()) }
+    var insightsAnchorNowMs by remember { mutableStateOf<Long?>(null) }
     val twentyEightDaysMs = 28L * 24 * 60 * 60 * 1000
 
     var isLoading by remember { mutableStateOf(true) }
@@ -117,28 +117,23 @@ private fun SmartInsightsContent(modifier: Modifier = Modifier) {
     var weightHistory by remember { mutableStateOf<List<SessionSummary>>(emptyList()) }
 
     LaunchedEffect(profileId) {
+        // Option A: fetch a broad 28-day slice once, then compute every card's time window from
+        // the exact same anchor timestamp. This avoids drift where query and computation use
+        // slightly different "now" values.
         isLoading = true
-        val fetchNowMs = currentTimeMillis()
-        nowMs = fetchNowMs
-
-        try {
-            val fetchResult = withContext(Dispatchers.IO) {
-                Triple(
-                    repository.getSessionSummariesSince(fetchNowMs - twentyEightDaysMs, profileId),
-                    repository.getExerciseLastPerformed(profileId),
-                    repository.getExerciseWeightHistory(profileId),
-                )
-            }
-
-            sessionSummaries = fetchResult.first
-            exerciseLastPerformed = fetchResult.second
-            weightHistory = fetchResult.third
-        } finally {
-            isLoading = false
+        insightsAnchorNowMs = null
+        val snapshotNowMs = currentTimeMillis()
+        insightsAnchorNowMs = snapshotNowMs
+        withContext(Dispatchers.IO) {
+            sessionSummaries =
+                repository.getSessionSummariesSince(snapshotNowMs - twentyEightDaysMs, profileId)
+            exerciseLastPerformed = repository.getExerciseLastPerformed(profileId)
+            weightHistory = repository.getExerciseWeightHistory(profileId)
         }
     }
 
-    if (isLoading) {
+    val anchorNowMs = insightsAnchorNowMs
+    if (isLoading || anchorNowMs == null) {
         Box(
             modifier = modifier.fillMaxSize(),
             contentAlignment = Alignment.Center,
@@ -148,15 +143,15 @@ private fun SmartInsightsContent(modifier: Modifier = Modifier) {
         return
     }
 
-    // Compute all insights
-    val weeklyVolume = remember(sessionSummaries, nowMs) {
-        SmartSuggestionsEngine.computeWeeklyVolume(sessionSummaries, nowMs)
+    // Compute all insights from the same fetch anchor timestamp (Option A).
+    val weeklyVolume = remember(sessionSummaries, anchorNowMs) {
+        SmartSuggestionsEngine.computeWeeklyVolume(sessionSummaries, anchorNowMs)
     }
-    val balanceAnalysis = remember(sessionSummaries, nowMs) {
-        SmartSuggestionsEngine.analyzeBalance(sessionSummaries, nowMs)
+    val balanceAnalysis = remember(sessionSummaries, anchorNowMs) {
+        SmartSuggestionsEngine.analyzeBalance(sessionSummaries, anchorNowMs)
     }
-    val neglectedExercises = remember(exerciseLastPerformed, nowMs) {
-        SmartSuggestionsEngine.findNeglectedExercises(exerciseLastPerformed, nowMs)
+    val neglectedExercises = remember(exerciseLastPerformed, anchorNowMs) {
+        SmartSuggestionsEngine.findNeglectedExercises(exerciseLastPerformed, anchorNowMs)
     }
     val plateaus = remember(weightHistory) {
         SmartSuggestionsEngine.detectPlateaus(weightHistory)
@@ -215,8 +210,8 @@ private fun SmartInsightsContent(modifier: Modifier = Modifier) {
 
         // Section F: Training Readiness / ACWR (ACWR-01)
         item {
-            val readiness = remember(sessionSummaries, nowMs) {
-                ReadinessEngine.computeReadiness(sessionSummaries, nowMs)
+            val readiness = remember(sessionSummaries, anchorNowMs) {
+                ReadinessEngine.computeReadiness(sessionSummaries, anchorNowMs)
             }
             ReadinessBriefingCard(readinessResult = readiness)
         }
