@@ -3,7 +3,6 @@ package com.devil.phoenixproject.presentation.components
 import android.annotation.SuppressLint
 import android.content.Context
 import android.media.AudioAttributes
-import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.SoundPool
 import android.os.Build
@@ -39,16 +38,15 @@ actual fun HapticFeedbackEffect(hapticEvents: SharedFlow<HapticEvent>) {
     // Track which sounds are loaded and ready to play
     val loadedSounds = remember { mutableSetOf<Int>() }
 
-    // Create SoundPool for audio feedback
-    // Uses USAGE_GAME to:
-    // 1. Tie sounds to media volume (not notification - so they play through DND)
-    // 2. Mix with music without interrupting it (game audio is designed for this)
+    // Create SoundPool for audio feedback.
+    // Uses USAGE_ASSISTANCE_SONIFICATION to mix with music without interrupting it.
+    // This is the pre-v0.7.0 configuration that worked reliably across Android versions.
     val soundPool = remember {
         SoundPool.Builder()
             .setMaxStreams(3)
             .setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_GAME)
+                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .build(),
             )
@@ -65,9 +63,7 @@ actual fun HapticFeedbackEffect(hapticEvents: SharedFlow<HapticEvent>) {
     val soundIds = remember(soundPool) {
         mutableMapOf<HapticEvent, Int>().apply {
             try {
-                // Issue #100: chirpchirp is louder/more audible than beep for rep completion
-                loadSoundByName(context, soundPool, "chirpchirp")?.let { put(HapticEvent.REP_COMPLETED, it) }
-                // Issue #100: Distinct boopbeepbeep sound on final working rep
+                loadSoundByName(context, soundPool, "beep")?.let { put(HapticEvent.REP_COMPLETED, it) }
                 loadSoundByName(context, soundPool, "boopbeepbeep")?.let { put(HapticEvent.FINAL_REP, it) }
                 loadSoundByName(context, soundPool, "beepboop")?.let { put(HapticEvent.WARMUP_COMPLETE, it) }
                 loadSoundByName(context, soundPool, "boopbeepbeep")?.let { put(HapticEvent.WORKOUT_COMPLETE, it) }
@@ -75,9 +71,7 @@ actual fun HapticFeedbackEffect(hapticEvents: SharedFlow<HapticEvent>) {
                 loadSoundByName(context, soundPool, "chirpchirp")?.let { put(HapticEvent.WORKOUT_END, it) }
                 loadSoundByName(context, soundPool, "restover")?.let { put(HapticEvent.REST_ENDING, it) }
                 loadSoundByName(context, soundPool, "discomode")?.let { put(HapticEvent.DISCO_MODE_UNLOCKED, it) }
-                // Issue #100: Warmup-to-working transition (ascending tone)
                 loadSoundByName(context, soundPool, "beepboop")?.let { put(HapticEvent.WARMUP_TO_WORKING, it) }
-                // Issue #313: Velocity loss threshold alert (attention-getting)
                 loadSoundByName(context, soundPool, "boopbeepbeep")?.let { put(HapticEvent.VELOCITY_THRESHOLD_REACHED, it) }
             } catch (e: Exception) {
                 Logger.e(e) { "Failed to load sounds" }
@@ -102,7 +96,7 @@ actual fun HapticFeedbackEffect(hapticEvents: SharedFlow<HapticEvent>) {
         }
     }
 
-    // Issue #100: Load countdown tick sound (reuses beep for short tick)
+    // Load countdown tick sound (reuses beep for short tick)
     val countdownTickSoundId = remember(soundPool) {
         loadSoundByName(context, soundPool, "beep")
     }
@@ -138,38 +132,13 @@ private fun loadSoundByName(context: Context, soundPool: SoundPool, name: String
         resId = context.resources.getIdentifier(name, "raw", context.packageName)
     }
 
-    if (resId == 0) {
-        Logger.w { "Sound resource not found: '$name' (tried packages: $packageName, ${context.packageName})" }
-        return null
-    }
+    if (resId == 0) return null
 
     return try {
         soundPool.load(context, resId, 1)
     } catch (e: Exception) {
-        Logger.e(e) { "Failed to load sound '$name' (resId=$resId)" }
+        Logger.e(e) { "Failed to load sound '$name'" }
         null
-    }
-}
-
-/**
- * Issue #409: Check media volume and log warning if muted.
- * USAGE_GAME routes to STREAM_MUSIC — if media volume is 0, all sounds are inaudible.
- * Requires Activity.volumeControlStream = AudioManager.STREAM_MUSIC to let
- * hardware volume buttons control the correct stream.
- */
-private fun warnIfMediaVolumeMuted(context: Context) {
-    try {
-        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
-        val currentVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-        if (currentVolume == 0) {
-            val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-            Logger.w {
-                "Issue #409: Media volume is 0/$maxVolume — workout sounds will be inaudible. " +
-                    "Sounds use USAGE_GAME (STREAM_MUSIC). Raise media volume to hear audio cues."
-            }
-        }
-    } catch (_: Exception) {
-        // Non-critical diagnostic — don't crash
     }
 }
 
@@ -190,9 +159,6 @@ private fun playSound(
 ) {
     // ERROR event has no sound
     if (event is HapticEvent.ERROR) return
-
-    // Issue #409: Log warning if media volume is muted
-    warnIfMediaVolumeMuted(context)
 
     // Fire OS: Always use MediaPlayer (SoundPool has volume bug)
     if (DeviceInfo.isFireOS()) {
@@ -232,14 +198,7 @@ private fun playSound(
     }
 
     if (soundId == null) {
-        Logger.d { "No SoundPool ID for event $event — falling back to MediaPlayer" }
-        playWithMediaPlayer(event, context)
-        return
-    }
-
-    // Issue #409: Check if sound has finished async loading before attempting playback
-    if (soundId !in loadedSounds) {
-        Logger.d { "Sound $soundId not yet loaded for $event — using MediaPlayer fallback" }
+        // Try MediaPlayer fallback for key events
         playWithMediaPlayer(event, context)
         return
     }
@@ -255,24 +214,23 @@ private fun playSound(
         )
         // If SoundPool fails, try MediaPlayer fallback
         if (streamId == 0) {
-            Logger.d { "SoundPool.play returned 0 for $event (soundId=$soundId) — MediaPlayer fallback" }
             playWithMediaPlayer(event, context)
         }
-    } catch (e: Exception) {
-        Logger.w(e) { "SoundPool.play threw for $event — MediaPlayer fallback" }
+    } catch (_: Exception) {
         playWithMediaPlayer(event, context)
     }
 }
 
 /**
  * Fallback sound playback using MediaPlayer for when SoundPool fails or on Fire OS.
- * Fire OS: Uses USAGE_MEDIA to work around SoundPool volume bug.
- * Standard Android: Uses USAGE_GAME to ensure sounds play through DND and use media volume.
+ * Uses simple MediaPlayer.create() without explicit AudioAttributes on standard Android
+ * to let the system route audio naturally (pre-v0.7.0 pattern).
+ * Fire OS: Uses explicit USAGE_MEDIA to work around SoundPool volume bug.
  */
 private fun playWithMediaPlayer(event: HapticEvent, context: Context) {
     val soundName = when (event) {
-        is HapticEvent.REP_COMPLETED -> "chirpchirp" // Issue #100: More audible than beep
-        is HapticEvent.FINAL_REP -> "boopbeepbeep" // Issue #100: Distinct final rep sound
+        is HapticEvent.REP_COMPLETED -> "beep"
+        is HapticEvent.FINAL_REP -> "boopbeepbeep"
         is HapticEvent.WARMUP_COMPLETE -> "beepboop"
         is HapticEvent.WORKOUT_COMPLETE -> "boopbeepbeep"
         is HapticEvent.WORKOUT_START -> "chirpchirp"
@@ -297,27 +255,25 @@ private fun playWithMediaPlayer(event: HapticEvent, context: Context) {
     }
     if (resId == 0) return
 
-    var mediaPlayer: MediaPlayer? = null
     try {
-        // Fire OS: Use USAGE_MEDIA to work around SoundPool volume bug
-        // Standard Android: Use USAGE_GAME to mix with music without interrupting
-        val audioAttributes = AudioAttributes.Builder()
-            .setUsage(
-                if (DeviceInfo.isFireOS()) {
-                    AudioAttributes.USAGE_MEDIA
-                } else {
-                    AudioAttributes.USAGE_GAME
-                },
-            )
-            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-            .build()
+        // Fire OS: Use explicit USAGE_MEDIA to work around SoundPool volume bug.
+        // Standard Android: Use simple create() with no explicit attributes — let the
+        // system route naturally. This is the pre-v0.7.0 pattern that worked reliably.
+        val mediaPlayer = if (DeviceInfo.isFireOS()) {
+            val audioAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+            MediaPlayer.create(context, resId, audioAttributes, 0)
+        } else {
+            MediaPlayer.create(context, resId)
+        } ?: return
 
-        mediaPlayer = MediaPlayer.create(context, resId, audioAttributes, 0) ?: return
         mediaPlayer.setVolume(1.0f, 1.0f)
         mediaPlayer.setOnCompletionListener { it.release() }
         mediaPlayer.start()
     } catch (_: Exception) {
-        mediaPlayer?.release()
+        // Silently fail - sound is not critical
     }
 }
 
@@ -362,7 +318,7 @@ private fun playHapticFeedback(vibrator: Vibrator, event: HapticEvent) {
             }
 
             is HapticEvent.FINAL_REP -> {
-                // Issue #100: Stronger vibration for final rep — double pulse with escalating amplitude
+                // Stronger vibration for final rep — double pulse with escalating amplitude
                 VibrationEffect.createWaveform(
                     longArrayOf(0, 80, 60, 120),
                     intArrayOf(0, 200, 0, 255),
@@ -373,17 +329,17 @@ private fun playHapticFeedback(vibrator: Vibrator, event: HapticEvent) {
             is HapticEvent.WARMUP_COMPLETE -> {
                 // Double pulse - strong
                 VibrationEffect.createWaveform(
-                    longArrayOf(0, 100, 100, 100), // timings: delay, on, off, on
-                    intArrayOf(0, 200, 0, 200), // amplitudes
-                    -1, // don't repeat
+                    longArrayOf(0, 100, 100, 100),
+                    intArrayOf(0, 200, 0, 200),
+                    -1,
                 )
             }
 
             is HapticEvent.WORKOUT_COMPLETE -> {
                 // Triple pulse - celebration pattern
                 VibrationEffect.createWaveform(
-                    longArrayOf(0, 100, 80, 100, 80, 150), // timings
-                    intArrayOf(0, 150, 0, 200, 0, 255), // amplitudes (escalating)
+                    longArrayOf(0, 100, 80, 100, 80, 150),
+                    intArrayOf(0, 150, 0, 200, 0, 255),
                     -1,
                 )
             }
@@ -439,7 +395,7 @@ private fun playHapticFeedback(vibrator: Vibrator, event: HapticEvent) {
             }
 
             is HapticEvent.VELOCITY_THRESHOLD_REACHED -> {
-                // Issue #313: Strong alert — double heavy pulse for velocity threshold
+                // Strong alert — double heavy pulse for velocity threshold
                 VibrationEffect.createWaveform(
                     longArrayOf(0, 120, 80, 150),
                     intArrayOf(0, 255, 0, 255),
@@ -448,12 +404,12 @@ private fun playHapticFeedback(vibrator: Vibrator, event: HapticEvent) {
             }
 
             is HapticEvent.COUNTDOWN_TICK -> {
-                // Issue #100: Very light tick for rest countdown (last 10 seconds)
+                // Very light tick for rest countdown (last 10 seconds)
                 VibrationEffect.createOneShot(30, 80)
             }
 
             is HapticEvent.WARMUP_TO_WORKING -> {
-                // Issue #100: Ascending double pulse for warmup-to-working transition
+                // Ascending double pulse for warmup-to-working transition
                 VibrationEffect.createWaveform(
                     longArrayOf(0, 80, 60, 120),
                     intArrayOf(0, 150, 0, 220),
@@ -476,7 +432,6 @@ private fun playHapticFeedback(vibrator: Vibrator, event: HapticEvent) {
             }
 
             is HapticEvent.FINAL_REP -> {
-                // Issue #100: Stronger double pulse for final rep
                 vibrator.vibrate(longArrayOf(0, 80, 60, 120), -1)
             }
 
@@ -513,12 +468,10 @@ private fun playHapticFeedback(vibrator: Vibrator, event: HapticEvent) {
             }
 
             is HapticEvent.COUNTDOWN_TICK -> {
-                // Issue #100: Light tick for countdown
                 vibrator.vibrate(30)
             }
 
             is HapticEvent.WARMUP_TO_WORKING -> {
-                // Issue #100: Double pulse for transition
                 vibrator.vibrate(longArrayOf(0, 80, 60, 120), -1)
             }
 

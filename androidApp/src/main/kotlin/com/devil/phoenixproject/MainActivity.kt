@@ -1,7 +1,6 @@
 package com.devil.phoenixproject
 
 import android.content.Context
-import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import android.os.LocaleList
@@ -20,12 +19,6 @@ class MainActivity : ComponentActivity() {
         // This reads directly from SharedPreferences instead of waiting for the
         // Compose ViewModel pipeline (which fires after the first frame).
         applyStoredLocaleBeforeComposition()
-
-        // Issue #409: Route hardware volume buttons to media stream.
-        // SoundPool/MediaPlayer use USAGE_GAME which maps to STREAM_MUSIC.
-        // Without this, volume buttons default to ring/notification stream,
-        // leaving media volume at 0 and all workout sounds inaudible.
-        volumeControlStream = AudioManager.STREAM_MUSIC
 
         enableEdgeToEdge()
         setContent {
