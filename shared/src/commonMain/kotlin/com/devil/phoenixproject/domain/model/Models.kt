@@ -475,7 +475,8 @@ sealed class HapticEvent {
  * @property timestamp Session start time as Unix epoch milliseconds
  * @property duration Session duration in MILLISECONDS (not seconds!)
  *                    Computed as `currentTimeMillis() - startTime`
- * @property weightPerCableKg Weight per cable in kilograms (total weight = weightPerCableKg * cableCount)
+ * @property weightPerCableKg Machine/storage weight per cable in kilograms. User-facing load
+ *                            displays should prefer displayMultiplier over physical cableCount.
  */
 data class WorkoutSession(
     val id: String = generateUUID(),
@@ -552,6 +553,14 @@ data class WorkoutSession(
  * configured set weight for legacy sessions.
  */
 fun WorkoutSession.effectiveHeaviestKgPerCable(): Float = heaviestLiftKg ?: weightPerCableKg
+
+/**
+ * Multiplier for user-facing saved-session load display.
+ *
+ * Prefer persisted display semantics when present; fall back to physical cable count only for
+ * legacy rows that predate displayMultiplier.
+ */
+fun WorkoutSession.displayLoadMultiplier(): Int = displayMultiplier ?: cableCount ?: 1
 
 /**
  * Effective total volume (kg) for analytics/display.

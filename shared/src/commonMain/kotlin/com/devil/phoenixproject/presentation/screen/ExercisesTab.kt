@@ -18,6 +18,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.devil.phoenixproject.domain.model.WeightUnit
 import com.devil.phoenixproject.domain.model.WorkoutSession
+import com.devil.phoenixproject.domain.model.displayLoadMultiplier
 import com.devil.phoenixproject.ui.theme.Spacing
 import com.devil.phoenixproject.util.KmpUtils
 import org.jetbrains.compose.resources.stringResource
@@ -62,7 +63,7 @@ fun ExercisesTab(
                     exerciseId = exerciseId,
                     exerciseName = exerciseNames[exerciseId] ?: "Unknown Exercise",
                     bestOneRepMax = calculateBestOneRepMax(sessions),
-                    bestWeight = sessions.maxOf { it.weightPerCableKg * (it.cableCount ?: 1) },
+                    bestWeight = sessions.maxOf { it.weightPerCableKg * it.displayLoadMultiplier() },
                     lastPerformed = sessions.maxOf { it.timestamp },
                     totalSessions = sessions.size,
                     totalSets = sessions.sumOf { estimateSets(it) },
@@ -347,8 +348,8 @@ private fun calculateOneRepMax(weight: Float, reps: Int): Float {
  */
 private fun calculateBestOneRepMax(sessions: List<WorkoutSession>): Float? = sessions.mapNotNull { session ->
     if (session.workingReps > 0) {
-        val totalWeight = session.weightPerCableKg * (session.cableCount ?: 1)
-        calculateOneRepMax(totalWeight, session.workingReps)
+        val displayWeight = session.weightPerCableKg * session.displayLoadMultiplier()
+        calculateOneRepMax(displayWeight, session.workingReps)
     } else {
         null
     }

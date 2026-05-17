@@ -89,6 +89,25 @@ data class Exercise(
 }
 
 /**
+ * Live HUD display multiplier for the narrow "two cables, one shared accessory" case.
+ *
+ * This intentionally fails closed to per-cable display unless the exercise metadata proves
+ * both cables attach to a single unified accessory.
+ */
+fun Exercise?.liveUnifiedAccessoryDisplayMultiplier(): Int {
+    val exercise = this ?: return 1
+    return if (
+        exercise.cableIntent == ExerciseCableIntent.DUAL &&
+        exercise.usesUnifiedAttachment &&
+        exercise.displayMultiplier == 2
+    ) {
+        2
+    } else {
+        1
+    }
+}
+
+/**
  * Exercise categories for organization
  * Used primarily for filtering and grouping in the UI
  */

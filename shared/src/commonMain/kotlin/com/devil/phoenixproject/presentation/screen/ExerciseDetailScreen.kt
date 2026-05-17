@@ -29,6 +29,7 @@ import com.devil.phoenixproject.data.repository.ExerciseRepository
 import com.devil.phoenixproject.domain.model.ConnectionState
 import com.devil.phoenixproject.domain.model.WeightUnit
 import com.devil.phoenixproject.domain.model.WorkoutSession
+import com.devil.phoenixproject.domain.model.displayLoadMultiplier
 import com.devil.phoenixproject.domain.model.effectiveTotalVolumeKg
 import com.devil.phoenixproject.presentation.components.charts.ProgressionLineChart
 import com.devil.phoenixproject.presentation.components.charts.VolumeTrendChart
@@ -73,12 +74,12 @@ fun ExerciseDetailScreen(exerciseId: String, navController: NavController, viewM
         viewModel.updateTopBarTitle("")
     }
 
-    // Calculate 1RM progression (using total weight = per-cable * cableCount)
+    // Calculate 1RM progression using saved-session display load semantics.
     val oneRepMaxData = remember(exerciseSessions) {
         exerciseSessions.mapNotNull { session ->
             if (session.workingReps > 0) {
-                val totalWeight = session.weightPerCableKg * (session.cableCount ?: 1)
-                val oneRm = calculateOneRepMax(totalWeight, session.workingReps)
+                val displayWeight = session.weightPerCableKg * session.displayLoadMultiplier()
+                val oneRm = calculateOneRepMax(displayWeight, session.workingReps)
                 session.timestamp to oneRm
             } else {
                 null
@@ -86,12 +87,12 @@ fun ExerciseDetailScreen(exerciseId: String, navController: NavController, viewM
         }.reversed() // Chronological order for chart
     }
 
-    // Weight-over-time trend data (total weight used per session)
+    // Weight-over-time trend data using saved-session display load semantics.
     val weightTrendData = remember(exerciseSessions) {
         exerciseSessions.mapNotNull { session ->
             if (session.weightPerCableKg > 0) {
-                val totalWeight = session.weightPerCableKg * (session.cableCount ?: 1)
-                session.timestamp to totalWeight
+                val displayWeight = session.weightPerCableKg * session.displayLoadMultiplier()
+                session.timestamp to displayWeight
             } else {
                 null
             }
@@ -600,7 +601,7 @@ private fun ExerciseHistoryTable(sessions: List<WorkoutSession>, weightUnit: Wei
                         TableCell(
                             WeightDisplayFormatter.formatDisplayWeight(
                                 session.weightPerCableKg,
-                                session.displayMultiplier ?: session.cableCount,
+                                session.displayLoadMultiplier(),
                                 weightUnit,
                             ),
                             Modifier.weight(1f),
@@ -615,9 +616,9 @@ private fun ExerciseHistoryTable(sessions: List<WorkoutSession>, weightUnit: Wei
                         )
                         TableCell(
                             if (session.workingReps > 0) {
-                                val totalWeight = session.weightPerCableKg * (session.cableCount ?: 1)
+                                val displayWeight = session.weightPerCableKg * session.displayLoadMultiplier()
                                 formatWeight(
-                                    calculateOneRepMax(totalWeight, session.workingReps),
+                                    calculateOneRepMax(displayWeight, session.workingReps),
                                     weightUnit,
                                 )
                             } else {
@@ -691,7 +692,7 @@ private fun SessionHistoryRow(session: WorkoutSession, weightUnit: WeightUnit, f
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
-                        "${WeightDisplayFormatter.formatDisplayWeight(session.weightPerCableKg, session.displayMultiplier ?: session.cableCount, weightUnit)} × ${session.workingReps} reps",
+                        "${WeightDisplayFormatter.formatDisplayWeight(session.weightPerCableKg, session.displayLoadMultiplier(), weightUnit)} × ${session.workingReps} reps",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

@@ -88,6 +88,8 @@ fun WorkoutHud(
     val isEchoMode = workoutParameters.isEchoMode
     val pagerState = rememberPagerState(pageCount = { 3 })
     val topBarModeLabel = if (isCurrentExerciseBodyweight) "Bodyweight" else workoutParameters.programMode.displayName
+    val currentRoutineExercise = loadedRoutine?.exercises?.getOrNull(currentExerciseIndex)
+    val liveDisplayMultiplier = currentRoutineExercise?.exercise.liveUnifiedAccessoryDisplayMultiplier()
 
     // Track consecutive high-asymmetry reps for alert (ASYM-05)
     var consecutiveHighAsymmetryCount by remember { mutableStateOf(0) }
@@ -131,6 +133,7 @@ fun WorkoutHud(
                 // should only be allowed when the machine is not engaged. Official app behavior.
                 showNextButton = false,
                 isCurrentExerciseBodyweight = isCurrentExerciseBodyweight,
+                liveDisplayMultiplier = liveDisplayMultiplier,
             )
         },
         containerColor = MaterialTheme.colorScheme.surface,
@@ -148,9 +151,8 @@ fun WorkoutHud(
                 when (page) {
                     0 -> {
                         // Derive exercise info for display
-                        val currentExercise = loadedRoutine?.exercises?.getOrNull(currentExerciseIndex)
-                        val exerciseName = currentExercise?.exercise?.name
-                        val totalSets = currentExercise?.setReps?.size ?: 0
+                        val exerciseName = currentRoutineExercise?.exercise?.name
+                        val totalSets = currentRoutineExercise?.setReps?.size ?: 0
 
                         ExecutionPage(
                             metric = metric,
@@ -167,6 +169,7 @@ fun WorkoutHud(
                             totalSets = totalSets,
                             timedExerciseRemainingSeconds = timedExerciseRemainingSeconds,
                             isCurrentExerciseBodyweight = isCurrentExerciseBodyweight,
+                            liveDisplayMultiplier = liveDisplayMultiplier,
                             isExerciseTimerPaused = isExerciseTimerPaused,
                             onPauseExerciseTimer = onPauseExerciseTimer,
                             onResumeExerciseTimer = onResumeExerciseTimer,
@@ -365,6 +368,7 @@ private fun HudBottomBar(
     onNextExercise: () -> Unit,
     showNextButton: Boolean,
     isCurrentExerciseBodyweight: Boolean,
+    liveDisplayMultiplier: Int,
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
@@ -380,8 +384,8 @@ private fun HudBottomBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // Weight Controls - Echo mode shows "Adaptive" since weight is dynamic
-            // Keep active-workout weight per cable. The official app only doubles for
-            // explicit "total weight" labels outside the live force display.
+            val isUnifiedAccessoryDisplay = liveDisplayMultiplier == 2
+            val selectedDisplayKg = workoutParameters.weightPerCableKg * liveDisplayMultiplier
             Column {
                 if (isCurrentExerciseBodyweight) {
                     Text(
@@ -396,7 +400,7 @@ private fun HudBottomBar(
                     )
                 } else {
                     Text(
-                        "Weight/cable",
+                        if (isUnifiedAccessoryDisplay) "Total weight" else "Weight/cable",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -404,7 +408,7 @@ private fun HudBottomBar(
                         if (workoutParameters.isEchoMode) {
                             "Adaptive"
                         } else {
-                            formatWeight(workoutParameters.weightPerCableKg, weightUnit)
+                            formatWeight(selectedDisplayKg, weightUnit)
                         },
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
@@ -442,6 +446,7 @@ private fun ExecutionPage(
     totalSets: Int = 0, // Total number of sets for current exercise
     timedExerciseRemainingSeconds: Int? = null, // Issue #192: Countdown for timed exercises
     isCurrentExerciseBodyweight: Boolean = false,
+    liveDisplayMultiplier: Int,
     isExerciseTimerPaused: Boolean = false,
     onPauseExerciseTimer: () -> Unit = {},
     onResumeExerciseTimer: () -> Unit = {},
@@ -630,7 +635,8 @@ private fun ExecutionPage(
 
         // Circular Force Gauge
         if (metric != null && !isCurrentExerciseBodyweight) {
-            // Current Load - show per-cable resistance
+            // Current Load - default to per-cable resistance, or show total only for
+            // explicit unified-accessory exercises.
             // Always use max(loadA, loadB) to show peak force (matches official app)
             // For Echo mode: use heuristic kgMax (actual measured force)
             //
@@ -643,24 +649,25 @@ private fun ExecutionPage(
                 // Use max of both loads - works for single and double cable exercises
                 maxOf(metric.loadA, metric.loadB)
             }
-            val targetWeight = workoutParameters.weightPerCableKg
-            val gaugeMax = (targetWeight * 1.5f).coerceAtLeast(20f)
+            val displayKg = perCableKg * liveDisplayMultiplier
+            val targetDisplayWeight = workoutParameters.weightPerCableKg * liveDisplayMultiplier
+            val gaugeMax = (targetDisplayWeight * 1.5f).coerceAtLeast(20f)
 
             // For Echo mode: show "—" when force data isn't available yet (Issue #52)
             // This prevents showing "0 kg" during initial reps before heuristic data populates
             val forceLabel = if (isEchoMode && perCableKg <= 0f) {
                 "—"
             } else {
-                formatWeight(perCableKg, weightUnit)
+                formatWeight(displayKg, weightUnit)
             }
 
             val hudSize = ResponsiveDimensions.componentSize(baseSize = 200.dp)
             CircularForceGauge(
-                currentForce = perCableKg,
+                currentForce = displayKg,
                 maxForce = gaugeMax,
                 velocity = (metric.velocityA + metric.velocityB) / 2.0,
                 label = forceLabel,
-                subLabel = "PER CABLE",
+                subLabel = if (liveDisplayMultiplier == 2) "TOTAL" else "PER CABLE",
                 modifier = Modifier.size(hudSize),
             )
         } else if (isCurrentExerciseBodyweight) {
