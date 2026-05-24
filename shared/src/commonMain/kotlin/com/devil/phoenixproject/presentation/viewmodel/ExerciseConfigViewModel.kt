@@ -15,6 +15,7 @@ import com.devil.phoenixproject.domain.model.WeightUnit
 import com.devil.phoenixproject.domain.model.WorkoutMode
 import com.devil.phoenixproject.domain.model.toWorkoutMode
 import com.devil.phoenixproject.util.KmpUtils
+import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -108,6 +109,9 @@ class ExerciseConfigViewModel constructor(
 
     private val _prTypeForScaling = MutableStateFlow(PRType.MAX_WEIGHT)
     val prTypeForScaling: StateFlow<PRType> = _prTypeForScaling.asStateFlow()
+
+    private var setWeightsPercentOfPR: List<Int> = emptyList()
+    private val pendingPercentOfPREditWeights = mutableMapOf<String, Float>()
 
     // Warm-up sets state (Issue #30)
     private val _warmupSets = MutableStateFlow<List<WarmupSet>>(emptyList())
@@ -213,6 +217,12 @@ class ExerciseConfigViewModel constructor(
         _usePercentOfPR.value = exercise.usePercentOfPR
         _weightPercentOfPR.value = exercise.weightPercentOfPR
         _prTypeForScaling.value = exercise.prTypeForScaling
+        pendingPercentOfPREditWeights.clear()
+        setWeightsPercentOfPR = normalizeSetWeightPercentages(
+            source = exercise.setWeightsPercentOfPR,
+            setCount = initialSets.size,
+            fallbackPercent = exercise.weightPercentOfPR,
+        )
 
         // Warm-up sets (Issue #30)
         _warmupSets.value = exercise.warmupSets
@@ -257,6 +267,7 @@ class ExerciseConfigViewModel constructor(
             try {
                 val pr = personalRecordRepository.getBestWeightPR(exerciseId, workoutMode, activeProfileId)
                 _currentExercisePR.value = pr
+                syncSetWeightsToPercentOfPR()
                 logDebug("Loaded PR for exercise=$exerciseId, mode=$workoutMode, profile=$activeProfileId: ${pr?.weightPerCableKg ?: "none"}")
             } catch (e: Exception) {
                 logWarning("Failed to load PR for exercise=$exerciseId, mode=$workoutMode, profile=$activeProfileId: ${e.message}")
@@ -310,10 +321,27 @@ class ExerciseConfigViewModel constructor(
     // PR percentage scaling handlers (Issue #57)
     fun onUsePercentOfPRChange(enabled: Boolean) {
         _usePercentOfPR.value = enabled
+        if (!enabled) {
+            pendingPercentOfPREditWeights.clear()
+        }
+        if (enabled) {
+            ensureSetWeightPercentages()
+            syncSetWeightsToPercentOfPR()
+        }
     }
 
     fun onWeightPercentOfPRChange(percent: Int) {
-        _weightPercentOfPR.value = percent.coerceIn(50, 120)
+        val previousPercent = _weightPercentOfPR.value.coerceIn(50, 120)
+        val coercedPercent = percent.coerceIn(50, 120)
+        _weightPercentOfPR.value = coercedPercent
+        if (_usePercentOfPR.value) {
+            ensureSetWeightPercentages()
+            if (setWeightsPercentOfPR.all { it == previousPercent }) {
+                setWeightsPercentOfPR = List(_sets.value.size) { coercedPercent }
+                pendingPercentOfPREditWeights.clear()
+            }
+            syncSetWeightsToPercentOfPR()
+        }
     }
 
     fun onPRTypeForScalingChange(prType: PRType) {
@@ -400,7 +428,75 @@ class ExerciseConfigViewModel constructor(
         return (pr.weightPerCableKg * percent / 100f).roundToHalfKg()
     }
 
-    private fun Float.roundToHalfKg(): Float = (this * 2).toInt() / 2f
+    private fun Float.roundToHalfKg(): Float = (this * 2).roundToInt() / 2f
+
+    private fun normalizeSetWeightPercentages(source: List<Int>, setCount: Int, fallbackPercent: Int): List<Int> {
+        if (setCount <= 0) return emptyList()
+        val fallback = fallbackPercent.coerceIn(50, 120)
+        return List(setCount) { index ->
+            (source.getOrNull(index) ?: fallback).coerceIn(50, 120)
+        }
+    }
+
+    private fun ensureSetWeightPercentages() {
+        setWeightsPercentOfPR = normalizeSetWeightPercentages(
+            source = setWeightsPercentOfPR,
+            setCount = _sets.value.size,
+            fallbackPercent = _weightPercentOfPR.value,
+        )
+    }
+
+    private fun resolvedSetWeightsKgFromCurrentPR(): List<Float>? {
+        val pr = _currentExercisePR.value ?: return null
+        if (!_usePercentOfPR.value || pr.weightPerCableKg <= 0f) return null
+        applyPendingPercentOfPREdits(pr)
+        ensureSetWeightPercentages()
+        return setWeightsPercentOfPR.map { percent ->
+            (pr.weightPerCableKg * percent / 100f).roundToHalfKg()
+        }
+    }
+
+    private fun syncSetWeightsToPercentOfPR() {
+        val resolvedWeightsKg = resolvedSetWeightsKgFromCurrentPR() ?: return
+        _sets.value = _sets.value.mapIndexed { index, set ->
+            val resolvedWeightKg = resolvedWeightsKg.getOrNull(index) ?: return@mapIndexed set
+            set.copy(weightPerCable = kgToDisplay(resolvedWeightKg, weightUnit))
+        }
+    }
+
+    private fun percentFromDisplayWeight(displayWeight: Float, pr: PersonalRecord): Int {
+        val weightKg = displayToKg(displayWeight, weightUnit)
+        return ((weightKg / pr.weightPerCableKg) * 100f).roundToInt().coerceIn(50, 120)
+    }
+
+    private fun displayWeightFromPercent(percent: Int, pr: PersonalRecord): Float {
+        val resolvedWeightKg = (pr.weightPerCableKg * percent / 100f).roundToHalfKg()
+        return kgToDisplay(resolvedWeightKg, weightUnit)
+    }
+
+    private fun applyPendingPercentOfPREdits(pr: PersonalRecord) {
+        if (pendingPercentOfPREditWeights.isEmpty()) return
+        ensureSetWeightPercentages()
+        val setsById = _sets.value.mapIndexed { index, set -> set.id to index }.toMap()
+
+        pendingPercentOfPREditWeights.forEach { (setId, displayWeight) ->
+            val setIndex = setsById[setId] ?: return@forEach
+            val percent = percentFromDisplayWeight(displayWeight, pr)
+            setWeightsPercentOfPR = setWeightsPercentOfPR.mapIndexed { index, existing ->
+                if (index == setIndex) percent else existing
+            }
+        }
+        pendingPercentOfPREditWeights.clear()
+    }
+
+    private fun updateSetPercentFromDisplayWeight(setIndex: Int, displayWeight: Float, pr: PersonalRecord): Int {
+        ensureSetWeightPercentages()
+        val percent = percentFromDisplayWeight(displayWeight, pr)
+        setWeightsPercentOfPR = setWeightsPercentOfPR.mapIndexed { index, existing ->
+            if (index == setIndex) percent else existing
+        }
+        return percent
+    }
 
     fun updateReps(setId: String, reps: Int?) {
         _sets.value = _sets.value.map { set ->
@@ -409,8 +505,25 @@ class ExerciseConfigViewModel constructor(
     }
 
     fun updateWeight(setId: String, weight: Float) {
-        _sets.value = _sets.value.map { set ->
-            if (set.id == setId) set.copy(weightPerCable = weight) else set
+        val setIndex = _sets.value.indexOfFirst { it.id == setId }
+        if (setIndex < 0) return
+
+        val pr = _currentExercisePR.value
+        val nextWeight = if (_usePercentOfPR.value && pr != null && pr.weightPerCableKg > 0f) {
+            pendingPercentOfPREditWeights.remove(setId)
+            val percent = updateSetPercentFromDisplayWeight(setIndex, weight, pr)
+            displayWeightFromPercent(percent, pr)
+        } else {
+            if (_usePercentOfPR.value) {
+                pendingPercentOfPREditWeights[setId] = weight
+            } else {
+                pendingPercentOfPREditWeights.remove(setId)
+            }
+            weight
+        }
+
+        _sets.value = _sets.value.mapIndexed { index, set ->
+            if (index == setIndex) set.copy(weightPerCable = nextWeight) else set
         }
     }
 
@@ -436,12 +549,26 @@ class ExerciseConfigViewModel constructor(
             restSeconds = lastSet?.restSeconds ?: 60,
         )
         _sets.value = _sets.value + newSet
+        if (_usePercentOfPR.value) {
+            setWeightsPercentOfPR = setWeightsPercentOfPR + _weightPercentOfPR.value.coerceIn(50, 120)
+            syncSetWeightsToPercentOfPR()
+        }
     }
 
     fun deleteSet(index: Int) {
+        val removedSetId = _sets.value.getOrNull(index)?.id
         val newSets = _sets.value.filterIndexed { i, _ -> i != index }
             .mapIndexed { i, set -> set.copy(setNumber = i + 1) }
         _sets.value = newSets
+        if (removedSetId != null) {
+            pendingPercentOfPREditWeights.remove(removedSetId)
+        }
+        val remainingSetIds = newSets.map { it.id }.toSet()
+        pendingPercentOfPREditWeights.keys.retainAll(remainingSetIds)
+        setWeightsPercentOfPR = setWeightsPercentOfPR.filterIndexed { i, _ -> i != index }
+        if (_usePercentOfPR.value) {
+            syncSetWeightsToPercentOfPR()
+        }
     }
 
     fun onSave(onSaveCallback: (RoutineExercise) -> Unit) {
@@ -471,25 +598,22 @@ class ExerciseConfigViewModel constructor(
         logDebug("Rest times to save: $restTimes")
         logDebug("Weights to save: ${_sets.value.map { displayToKg(it.weightPerCable, weightUnit) }}")
 
-        val existingPercentages = originalExercise.setWeightsPercentOfPR
-        val hasCustomPercentages = existingPercentages.isNotEmpty() &&
-            existingPercentages.any { it != originalExercise.weightPercentOfPR }
+        val resolvedSetWeightsKg = resolvedSetWeightsKgFromCurrentPR()
+            ?: _sets.value.map { displayToKg(it.weightPerCable, weightUnit) }
         val resolvedSetWeightsPercentOfPR = if (_usePercentOfPR.value) {
-            if (hasCustomPercentages) {
-                List(_sets.value.size) { index ->
-                    existingPercentages.getOrNull(index) ?: _weightPercentOfPR.value
-                }
-            } else {
-                List(_sets.value.size) { _weightPercentOfPR.value }
-            }
+            normalizeSetWeightPercentages(
+                source = setWeightsPercentOfPR,
+                setCount = _sets.value.size,
+                fallbackPercent = _weightPercentOfPR.value,
+            )
         } else {
             emptyList()
         }
 
         val updatedExercise = originalExercise.copy(
             setReps = _sets.value.map { it.reps },
-            weightPerCableKg = displayToKg(_sets.value.first().weightPerCable, weightUnit),
-            setWeightsPerCableKg = _sets.value.map { displayToKg(it.weightPerCable, weightUnit) },
+            weightPerCableKg = resolvedSetWeightsKg.first(),
+            setWeightsPerCableKg = resolvedSetWeightsKg,
             programMode = _selectedMode.value.toProgramMode(),
             eccentricLoad = _eccentricLoad.value,
             echoLevel = _echoLevel.value,
