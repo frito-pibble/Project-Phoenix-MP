@@ -10,6 +10,7 @@ enum class IntegrationProvider(val key: String, val displayName: String) {
     STRONG("strong", "Strong"),
     APPLE_HEALTH("apple_health", "Apple Health"),
     GOOGLE_HEALTH("google_health", "Google Health Connect"),
+    UNKNOWN("unknown", "Unknown"),
     ;
 
     companion object {
@@ -60,4 +61,5 @@ data class ExternalActivity(
     val syncedAt: Long = currentTimeMillis(),
     val profileId: String = "default",
     val needsSync: Boolean = false,
+    val deletedAt: Long? = null,
 )

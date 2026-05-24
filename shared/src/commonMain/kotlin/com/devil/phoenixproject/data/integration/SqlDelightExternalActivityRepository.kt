@@ -28,7 +28,7 @@ class SqlDelightExternalActivityRepository(db: VitruvianDatabase) : ExternalActi
     private fun com.devil.phoenixproject.database.ExternalActivity.toDomain(): ExternalActivity = ExternalActivity(
         id = id,
         externalId = externalId,
-        provider = IntegrationProvider.fromKey(provider) ?: IntegrationProvider.HEVY,
+        provider = IntegrationProvider.fromKey(provider) ?: IntegrationProvider.UNKNOWN,
         name = name,
         activityType = activityType,
         startedAt = startedAt,
@@ -42,10 +42,11 @@ class SqlDelightExternalActivityRepository(db: VitruvianDatabase) : ExternalActi
         syncedAt = syncedAt,
         profileId = profileId,
         needsSync = needsSync != 0L,
+        deletedAt = deletedAt,
     )
 
     private fun com.devil.phoenixproject.database.IntegrationStatus.toDomain(): IntegrationStatus = IntegrationStatus(
-        provider = IntegrationProvider.fromKey(provider) ?: IntegrationProvider.HEVY,
+        provider = IntegrationProvider.fromKey(provider) ?: IntegrationProvider.UNKNOWN,
         status = runCatching { ConnectionStatus.valueOf(status.uppercase()) }
             .getOrDefault(ConnectionStatus.DISCONNECTED),
         lastSyncAt = lastSyncAt,
@@ -98,6 +99,7 @@ class SqlDelightExternalActivityRepository(db: VitruvianDatabase) : ExternalActi
                         syncedAt = activity.syncedAt,
                         profileId = activity.profileId,
                         needsSync = if (activity.needsSync) 1L else 0L,
+                        deletedAt = activity.deletedAt,
                     )
                     // UPDATE: updates data fields for any existing row.
                     // Preserves id and needsSync (not touched by this statement).
@@ -114,9 +116,10 @@ class SqlDelightExternalActivityRepository(db: VitruvianDatabase) : ExternalActi
                         elevationGainMeters = activity.elevationGainMeters,
                         rawData = activity.rawData,
                         syncedAt = activity.syncedAt,
-                        profileId = activity.profileId,
+                        deletedAt = activity.deletedAt,
                         externalId = activity.externalId,
                         provider = activity.provider.key,
+                        profileId = activity.profileId,
                     )
                 }
             }
@@ -142,6 +145,29 @@ class SqlDelightExternalActivityRepository(db: VitruvianDatabase) : ExternalActi
                     queries.markExternalActivitySyncedBySyncKey(
                         externalId = syncKey.externalId,
                         provider = syncKey.provider.key,
+                        profileId = profileId,
+                    )
+                }
+            }
+        }
+    }
+
+    override suspend fun markDeletedByExternalIds(
+        provider: IntegrationProvider,
+        profileId: String,
+        externalIds: List<String>,
+        deletedAt: Long,
+        needsSync: Boolean,
+    ) {
+        if (externalIds.isEmpty()) return
+        withContext(Dispatchers.IO) {
+            queries.transaction {
+                for (externalId in externalIds) {
+                    queries.markExternalActivityDeletedBySyncKey(
+                        deletedAt = deletedAt,
+                        needsSync = if (needsSync) 1L else 0L,
+                        externalId = externalId,
+                        provider = provider.key,
                         profileId = profileId,
                     )
                 }
