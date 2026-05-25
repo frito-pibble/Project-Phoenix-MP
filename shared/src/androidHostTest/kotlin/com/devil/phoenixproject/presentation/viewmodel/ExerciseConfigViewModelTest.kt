@@ -9,9 +9,12 @@ import com.devil.phoenixproject.domain.model.PersonalRecord
 import com.devil.phoenixproject.domain.model.ProgramMode
 import com.devil.phoenixproject.domain.model.RoutineExercise
 import com.devil.phoenixproject.domain.model.WeightUnit
+import com.devil.phoenixproject.presentation.screen.shouldShowCableOnlyExerciseControls
+import com.devil.phoenixproject.presentation.screen.shouldShowStopAtTopToggle
 import com.devil.phoenixproject.testutil.FakePersonalRecordRepository
 import com.devil.phoenixproject.testutil.createTestDatabase
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -47,6 +50,31 @@ class ExerciseConfigViewModelTest {
 
         assertEquals(ExerciseType.BODYWEIGHT, viewModel.exerciseType.value)
         assertEquals(SetMode.DURATION, viewModel.setMode.value)
+    }
+
+    @Test
+    fun `bodyweight exercise hides cable-only configuration toggles`() {
+        val bodyweightSets = listOf(SetConfiguration(setNumber = 1, reps = 10))
+
+        assertFalse(shouldShowCableOnlyExerciseControls(ExerciseType.BODYWEIGHT))
+        assertFalse(shouldShowStopAtTopToggle(ExerciseType.BODYWEIGHT, bodyweightSets))
+    }
+
+    @Test
+    fun `standard exercise shows cable-only configuration toggles except stop at top for all AMRAP`() {
+        assertTrue(shouldShowCableOnlyExerciseControls(ExerciseType.STANDARD))
+        assertTrue(
+            shouldShowStopAtTopToggle(
+                ExerciseType.STANDARD,
+                listOf(SetConfiguration(setNumber = 1, reps = 10)),
+            ),
+        )
+        assertFalse(
+            shouldShowStopAtTopToggle(
+                ExerciseType.STANDARD,
+                listOf(SetConfiguration(setNumber = 1, reps = null)),
+            ),
+        )
     }
 
     @Test

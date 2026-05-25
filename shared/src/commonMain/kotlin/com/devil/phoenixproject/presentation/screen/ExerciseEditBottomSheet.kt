@@ -173,6 +173,10 @@ fun ExerciseEditBottomSheet(
         if (weightUnit == WeightUnit.LB) 0.5f else 0.25f
     }
     val maxWeightChange = 10
+    val showCableOnlyExerciseControls = shouldShowCableOnlyExerciseControls(exerciseType)
+    val isTutMode = showCableOnlyExerciseControls &&
+        (selectedMode is WorkoutMode.TUT || selectedMode is WorkoutMode.TUTBeast)
+    val isEchoMode = showCableOnlyExerciseControls && selectedMode is WorkoutMode.Echo
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
@@ -307,7 +311,7 @@ fun ExerciseEditBottomSheet(
 
                 // Weight Configuration Section (PR Percentage Scaling - Issue #57)
                 // Only show for standard exercises (not bodyweight)
-                if (exerciseType == ExerciseType.STANDARD) {
+                if (showCableOnlyExerciseControls) {
                     WeightConfigurationCard(
                         usePercentOfPR = usePercentOfPR,
                         weightPercentOfPR = weightPercentOfPR,
@@ -320,7 +324,7 @@ fun ExerciseEditBottomSheet(
                 }
 
                 // Mode Selector
-                if (exerciseType == ExerciseType.STANDARD) {
+                if (showCableOnlyExerciseControls) {
                     ModeSelector(
                         selectedMode = selectedMode,
                         onModeChange = viewModel::onSelectedModeChange,
@@ -328,7 +332,6 @@ fun ExerciseEditBottomSheet(
                 }
 
                 // TUT Beast toggle
-                val isTutMode = selectedMode is WorkoutMode.TUT || selectedMode is WorkoutMode.TUTBeast
                 if (isTutMode) {
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
@@ -360,7 +363,6 @@ fun ExerciseEditBottomSheet(
                 }
 
                 // Echo Mode options
-                val isEchoMode = selectedMode is WorkoutMode.Echo
                 if (isEchoMode) {
                     EccentricLoadSelector(
                         eccentricLoad = eccentricLoad,
@@ -373,7 +375,7 @@ fun ExerciseEditBottomSheet(
                 }
 
                 // Weight Change Per Rep
-                if (exerciseType == ExerciseType.STANDARD && !isEchoMode) {
+                if (showCableOnlyExerciseControls && !isEchoMode) {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
@@ -409,10 +411,12 @@ fun ExerciseEditBottomSheet(
                 }
 
                 // Set Mode Toggle
-                SetModeToggle(
-                    setMode = setMode,
-                    onModeChange = viewModel::onSetModeChange,
-                )
+                if (showCableOnlyExerciseControls) {
+                    SetModeToggle(
+                        setMode = setMode,
+                        onModeChange = viewModel::onSetModeChange,
+                    )
+                }
 
                 // Per Set Rest Time toggle
                 Surface(
@@ -442,86 +446,88 @@ fun ExerciseEditBottomSheet(
                     }
                 }
 
-                // Stall Detection toggle - visible for all exercises
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.surfaceVariant),
-                    shadowElevation = 2.dp,
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(Spacing.small),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
+                if (showCableOnlyExerciseControls) {
+                    // Stall Detection toggle
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.surfaceVariant),
+                        shadowElevation = 2.dp,
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Stall Detection",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = if (stallDetectionEnabled) FontWeight.Bold else FontWeight.Normal,
-                                color = if (stallDetectionEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                            )
-                            Text(
-                                text = "Auto-stop set when movement pauses for 5 seconds",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(
-                            checked = stallDetectionEnabled,
-                            onCheckedChange = viewModel::onStallDetectionEnabledChange,
-                        )
-                    }
-                }
-
-                // Rep Count Timing toggle
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.surfaceVariant),
-                    shadowElevation = 2.dp,
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(Spacing.small),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Rep Count Timing",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = if (repCountTiming == RepCountTiming.TOP) FontWeight.Bold else FontWeight.Normal,
-                                color = if (repCountTiming == RepCountTiming.TOP) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                            )
-                            Text(
-                                text = if (repCountTiming == RepCountTiming.TOP) {
-                                    "Count at top of lift (concentric peak)"
-                                } else {
-                                    "Count at bottom (eccentric valley)"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(
-                            checked = repCountTiming == RepCountTiming.TOP,
-                            onCheckedChange = { isTop ->
-                                viewModel.onRepCountTimingChange(
-                                    if (isTop) RepCountTiming.TOP else RepCountTiming.BOTTOM,
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(Spacing.small),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Stall Detection",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (stallDetectionEnabled) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (stallDetectionEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                                 )
-                            },
-                        )
+                                Text(
+                                    text = "Auto-stop set when movement pauses for 5 seconds",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Switch(
+                                checked = stallDetectionEnabled,
+                                onCheckedChange = viewModel::onStallDetectionEnabledChange,
+                            )
+                        }
+                    }
+
+                    // Rep Count Timing toggle
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.surfaceVariant),
+                        shadowElevation = 2.dp,
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(Spacing.small),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Rep Count Timing",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (repCountTiming == RepCountTiming.TOP) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (repCountTiming == RepCountTiming.TOP) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                )
+                                Text(
+                                    text = if (repCountTiming == RepCountTiming.TOP) {
+                                        "Count at top of lift (concentric peak)"
+                                    } else {
+                                        "Count at bottom (eccentric valley)"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Switch(
+                                checked = repCountTiming == RepCountTiming.TOP,
+                                onCheckedChange = { isTop ->
+                                    viewModel.onRepCountTimingChange(
+                                        if (isTop) RepCountTiming.TOP else RepCountTiming.BOTTOM,
+                                    )
+                                },
+                            )
+                        }
                     }
                 }
 
-                // Stop at Top toggle — hidden for fully AMRAP exercises
-                if (!sets.all { it.reps == null }) {
+                // Stop at Top toggle - hidden for bodyweight and fully AMRAP exercises
+                if (shouldShowStopAtTopToggle(exerciseType, sets)) {
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
@@ -563,7 +569,7 @@ fun ExerciseEditBottomSheet(
 
                 // Warm-up Sets Configuration (Issue #30)
                 // Only show for standard exercises (not bodyweight)
-                if (exerciseType == ExerciseType.STANDARD) {
+                if (showCableOnlyExerciseControls) {
                     WarmupSetsConfiguration(
                         warmupSets = warmupSets,
                         workingWeight = sets.firstOrNull()?.weightPerCable ?: 0f,
@@ -669,6 +675,12 @@ fun ExerciseEditBottomSheet(
         }
     }
 }
+
+internal fun shouldShowCableOnlyExerciseControls(exerciseType: ExerciseType): Boolean =
+    exerciseType == ExerciseType.STANDARD
+
+internal fun shouldShowStopAtTopToggle(exerciseType: ExerciseType, sets: List<SetConfiguration>): Boolean =
+    shouldShowCableOnlyExerciseControls(exerciseType) && sets.any { it.reps != null }
 
 @Composable
 fun SetModeToggle(
