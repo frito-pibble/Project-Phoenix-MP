@@ -139,6 +139,7 @@ import vitruvianprojectphoenix.shared.generated.resources.cd_developer_tools
 import vitruvianprojectphoenix.shared.generated.resources.cd_led_scheme
 import vitruvianprojectphoenix.shared.generated.resources.cd_leds_off
 import vitruvianprojectphoenix.shared.generated.resources.cd_link_portal
+import vitruvianprojectphoenix.shared.generated.resources.cd_machine_diagnostics
 import vitruvianprojectphoenix.shared.generated.resources.cd_open_backup_folder
 import vitruvianprojectphoenix.shared.generated.resources.cd_restore_data
 import vitruvianprojectphoenix.shared.generated.resources.cd_support_developer
@@ -213,6 +214,7 @@ fun SettingsTab(
     onColorSchemeChange: (Int) -> Unit,
     onDeleteAllWorkouts: () -> Unit,
     onNavigateToConnectionLogs: () -> Unit = {},
+    onNavigateToDiagnostics: () -> Unit = {},
     onNavigateToBadges: () -> Unit = {},
     onNavigateToLinkAccount: () -> Unit = {},
     onNavigateToIntegrations: () -> Unit = {},
@@ -2210,6 +2212,39 @@ fun SettingsTab(
                     )
                 }
                 Spacer(modifier = Modifier.height(Spacing.small))
+
+                OutlinedButton(
+                    onClick = onNavigateToDiagnostics,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary,
+                    ),
+                    border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary),
+                ) {
+                    Icon(
+                        Icons.Default.BugReport,
+                        contentDescription = stringResource(Res.string.cd_machine_diagnostics),
+                        modifier = Modifier.size(24.dp),
+                    )
+                    Spacer(modifier = Modifier.width(Spacing.small))
+                    Text(
+                        "Machine Diagnostics",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "View uptime, fault codes, temperatures, crash data, and warnings from the machine",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                Spacer(modifier = Modifier.height(Spacing.medium))
 
                 OutlinedButton(
                     onClick = onNavigateToConnectionLogs,
