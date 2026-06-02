@@ -69,6 +69,7 @@ test_output.txt
 .skills
 docs/LAST_SESSION.md
 .claude
+graphify-out/
 LAST_SESSION.md
 CHANGELOG.md
 .aider*
